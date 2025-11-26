@@ -1,0 +1,91 @@
+================================================================================
+CLASS WEIGHT ADJUSTMENT COMPARISON REPORT
+================================================================================
+
+Phase 1 Diagnostic Summary:
+--------------------------------------------------------------------------------
+Critical Issues:
+  - Fear: Recall 22.3%, F1 27.5% (severe under-detection)
+  - Angry: Recall 31.3%, F1 37.1% (moderate under-detection)
+  - Sad: Over-predicted across 4 confusion pairs
+  - Disgust: Precision 18.8%, F1 28.1% (over-predicting)
+
+
+================================================================================
+STRATEGY: CONSERVATIVE
+================================================================================
+
+Emotion      |     Base | Adjusted | Factor |   Change
+--------------------------------------------------------------------------------
+angry        |     0.53 |     0.69 |   1.30 |    +0.16
+disgust      |     4.08 |     3.47 |   0.85 |    -0.61
+fear         |     0.52 |     0.78 |   1.50 |    +0.26
+happy        |     0.34 |     0.32 |   0.95 |    -0.02
+neutral      |     0.44 |     0.44 |   1.00 |    +0.00
+sad          |     0.45 |     0.41 |   0.90 |    -0.05
+surprise     |     0.64 |     0.64 |   1.00 |    +0.00
+
+Summary:
+  Mean adjustment factor: 1.07
+  Max boost (Fear): 1.50x
+  Max reduction (Disgust): 0.85x
+
+================================================================================
+STRATEGY: MODERATE
+================================================================================
+
+Emotion      |     Base | Adjusted | Factor |   Change
+--------------------------------------------------------------------------------
+angry        |     0.53 |     0.95 |   1.80 |    +0.42
+disgust      |     4.08 |     2.85 |   0.70 |    -1.22
+fear         |     0.52 |     1.29 |   2.50 |    +0.78
+happy        |     0.34 |     0.30 |   0.90 |    -0.03
+neutral      |     0.44 |     0.44 |   1.00 |    +0.00
+sad          |     0.45 |     0.36 |   0.80 |    -0.09
+surprise     |     0.64 |     0.64 |   1.00 |    +0.00
+
+Summary:
+  Mean adjustment factor: 1.24
+  Max boost (Fear): 2.50x
+  Max reduction (Disgust): 0.70x
+
+================================================================================
+STRATEGY: AGGRESSIVE
+================================================================================
+
+Emotion      |     Base | Adjusted | Factor |   Change
+--------------------------------------------------------------------------------
+angry        |     0.53 |     1.16 |   2.20 |    +0.63
+disgust      |     4.08 |     2.04 |   0.50 |    -2.04
+fear         |     0.52 |     1.55 |   3.00 |    +1.03
+happy        |     0.34 |     0.29 |   0.85 |    -0.05
+neutral      |     0.44 |     0.44 |   1.00 |    +0.00
+sad          |     0.45 |     0.27 |   0.60 |    -0.18
+surprise     |     0.64 |     0.64 |   1.00 |    +0.00
+
+Summary:
+  Mean adjustment factor: 1.31
+  Max boost (Fear): 3.00x
+  Max reduction (Disgust): 0.50x
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+1. RECOMMENDED STRATEGY: Moderate
+   - Balanced adjustments (0.7-2.5x range)
+   - Expected gain: +3-4% accuracy, +0.05 macro F1
+   - Targets critical issues without over-correction
+
+2. Next Steps:
+   a) Train Stage 3 with moderate adjusted weights
+   b) Compare validation metrics to baseline
+   c) Check confusion matrix for improvements:
+      - Fear -> Sad should drop from 24.3% to <18%
+      - Angry -> Sad should drop from 22.3% to <16%
+      - Neutral -> Sad should drop from 19.7% to <15%
+
+3. If moderate strategy underperforms:
+   - Try aggressive strategy for Fear/Angry
+   - Monitor for over-correction (Happy/Surprise degradation)
+

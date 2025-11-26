@@ -1,0 +1,58 @@
+================================================================================
+OPTIMIZER & LEARNING RATE BENCHMARK REPORT
+================================================================================
+
+Objective:
+  Compare Adam vs AdamW with different learning rates for Stage 3 training.
+  Current baseline: Adam with LR=5e-6, producing Val Loss=1.32
+
+Hypothesis:
+  - LR too conservative (5e-6) → slow convergence
+  - AdamW better weight decay handling for 138M parameters
+  - Higher LR (1e-5, 2e-5) could improve final performance
+
+================================================================================
+RESULTS SUMMARY
+================================================================================
+
+Rank   | Config       |   Val Loss |    Val Acc |  Converged
+--------------------------------------------------------------------------------
+1      | AdamW_2e-5   |     1.1922 |     56.29% |       True ***
+2      | Adam_2e-5    |     1.1567 |     56.29% |       True 
+3      | Adam_1e-5    |     1.2352 |     56.17% |       True 
+4      | AdamW_1e-5   |     1.2891 |     53.87% |       True 
+5      | AdamW_5e-6   |     1.3370 |     51.86% |       True 
+6      | Adam_5e-6    |     1.3272 |     50.68% |       True 
+
+================================================================================
+BEST CONFIGURATION
+================================================================================
+
+Config: Adam_2e-5
+  Optimizer: ADAM
+  Learning Rate: 2e-05
+  Weight Decay: 1e-04
+
+Performance:
+  Validation Loss: 1.1567
+  Validation Accuracy: 56.29%
+  Converged: Yes
+
+Improvement over baseline (Adam_5e-6):
+  Val Loss: 1.3272 -> 1.1567 (-0.1705)
+  Val Acc: 50.68% -> 56.29% (+5.61%)
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+1. Use the best configuration for Stage 3 training:
+   python scripts/train_stage3_deep.py \
+     --lr 2e-05 \
+     --weight-decay 1e-04
+
+3. Expected improvements:
+   - Better convergence (loss reduction)
+   - Improved validation accuracy
+   - More stable training
+

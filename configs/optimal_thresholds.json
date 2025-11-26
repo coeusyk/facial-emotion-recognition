@@ -1,0 +1,14 @@
+{
+  "thresholds": {
+    "angry": 0.3,
+    "disgust": 0.5500000000000003,
+    "fear": 0.3,
+    "happy": 0.3,
+    "neutral": 0.3,
+    "sad": 0.3,
+    "surprise": 0.4000000000000001
+  },
+  "description": "Optimal per-class decision thresholds (F1-optimized)",
+  "baseline": 0.5,
+  "usage": "Use these thresholds instead of argmax for multi-class prediction"
+}

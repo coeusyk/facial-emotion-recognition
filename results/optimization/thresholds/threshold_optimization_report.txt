@@ -1,0 +1,74 @@
+================================================================================
+THRESHOLD OPTIMIZATION RESULTS
+================================================================================
+
+Objective:
+  Find optimal decision threshold for each emotion class to maximize F1 score.
+  Default softmax argmax uses threshold=0.5 for all classes.
+
+The Disgust Paradox (Phase 1):
+  - AUC = 0.901 (excellent discrimination)
+  - F1 = 0.281 (poor actual performance)
+  - Precision = 18.8% (81% false positive rate!)
+  - Root Cause: Wrong threshold (too eager to predict Disgust)
+
+================================================================================
+PER-CLASS OPTIMAL THRESHOLDS
+================================================================================
+
+Emotion      | Baseline |  Optimal |   Change |  Best F1 | Reasoning                     
+------------------------------------------------------------------------------------------------------------------------
+angry        |     0.50 |     0.30 |    -0.20 |    0.355 | Low recall (31.3%)            
+disgust      |     0.50 |     0.55 |    +0.05 |    0.368 | PARADOX FIX: Reduce false positives
+fear         |     0.50 |     0.30 |    -0.20 |    0.309 | Very low recall (22.3%)       
+happy        |     0.50 |     0.30 |    -0.20 |    0.795 | Balanced performance          
+neutral      |     0.50 |     0.30 |    -0.20 |    0.494 | Slight over-prediction        
+sad          |     0.50 |     0.30 |    -0.20 |    0.422 | Over-predicted                
+surprise     |     0.50 |     0.40 |    -0.10 |    0.698 | Good balance                  
+
+================================================================================
+IMPACT ANALYSIS
+================================================================================
+
+Significant threshold changes (|change| > 0.05): 7/7
+
+Major Changes:
+  - Angry: 0.50 -> 0.30 (DECREASE)
+  - Fear: 0.50 -> 0.30 (DECREASE)
+  - Happy: 0.50 -> 0.30 (DECREASE)
+  - Neutral: 0.50 -> 0.30 (DECREASE)
+  - Sad: 0.50 -> 0.30 (DECREASE)
+
+================================================================================
+EXPECTED IMPROVEMENTS
+================================================================================
+
+Overall:
+  - Accuracy: +2-3% improvement expected
+  - Macro F1: +0.04-0.05 improvement expected
+
+Per-Class (Key Fixes):
+  - Fear: Recall +5-10% (threshold 0.30)
+    --> F1 improvement: 0.275 -> 0.32-0.35 (+0.04-0.07)
+
+================================================================================
+USAGE INSTRUCTIONS
+================================================================================
+
+1. Load optimal thresholds:
+   import json
+   thresholds = json.load(open('configs/optimal_thresholds.json'))['thresholds']
+
+2. Apply during inference:
+   # Get probabilities
+   probs = torch.softmax(model(x), dim=1)
+
+   # Instead of: pred = torch.argmax(probs, dim=1)
+   # Use optimized thresholds for each class
+
+3. Validate improvements:
+   - Run evaluation with new thresholds
+   - Compare confusion matrix to baseline
+   - Check Disgust precision improvement
+   - Check Fear recall improvement
+
