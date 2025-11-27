@@ -10,7 +10,8 @@ failure modes identified in Phase 1 diagnostics:
 3. Confusion-Aware Augmentation - Target specific confusion pairs
 4. Label Smoothing - Reduce overconfidence and improve calibration
 5. Optimizer Benchmark - Test AdamW vs Adam with different learning rates
-6. Targeted Grid Search - Fine-tune remaining hyperparameters
+5b. Stage 2 Optimizer Benchmark - Optimize Stage 2 learning rate and weight decay
+6. Grid Search - Full hyperparameter grid search with subprocess training
 
 Author: FER-2013 Optimization Pipeline
 Date: November 2025
@@ -39,9 +40,13 @@ from .optimizer_benchmark import (
     save_benchmark_results
 )
 
-from .targeted_grid_search import (
+from .grid_search import (
+    generate_grid_configs,
     run_grid_search,
-    save_grid_search_results
+    run_single_config,
+    analyze_results,
+    print_configs_preview,
+    GridSearchConfig
 )
 
 __all__ = [
@@ -60,11 +65,15 @@ __all__ = [
     'ConfusionAwareDataset',
     'get_confusion_aware_dataloader',
     
-    # Component 4: Optimizer Benchmark
+    # Component 5: Optimizer Benchmark
     'run_optimizer_benchmark',
     'save_benchmark_results',
     
-    # Component 5: Grid Search
+    # Component 6: Grid Search
+    'generate_grid_configs',
     'run_grid_search',
-    'save_grid_search_results',
+    'run_single_config',
+    'analyze_results',
+    'print_configs_preview',
+    'GridSearchConfig',
 ]

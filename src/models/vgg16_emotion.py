@@ -9,7 +9,7 @@ from torchvision import models
 from torchvision.models import VGG16_Weights
 
 
-def build_emotion_model(num_classes=7, pretrained=True, verbose=True):
+def build_emotion_model(num_classes=7, pretrained=True, dropout=0.5, verbose=True):
     """
     Build emotion recognition model using VGG16 transfer learning.
     
@@ -21,6 +21,7 @@ def build_emotion_model(num_classes=7, pretrained=True, verbose=True):
     Args:
         num_classes (int): Number of emotion classes
         pretrained (bool): Whether to use pretrained ImageNet weights
+        dropout (float): Dropout rate for classifier layers (default: 0.5)
         verbose (bool): Whether to print model information
         
     Returns:
@@ -100,13 +101,13 @@ def build_emotion_model(num_classes=7, pretrained=True, verbose=True):
         nn.Linear(num_features, 512),
         nn.ReLU(inplace=True),
         nn.BatchNorm1d(512),
-        nn.Dropout(0.5),
+        nn.Dropout(dropout),
         
         # Second dense layer
         nn.Linear(512, 256),
         nn.ReLU(inplace=True),
         nn.BatchNorm1d(256),
-        nn.Dropout(0.5),
+        nn.Dropout(dropout),
         
         # Output layer
         nn.Linear(256, num_classes)
@@ -114,8 +115,8 @@ def build_emotion_model(num_classes=7, pretrained=True, verbose=True):
     
     if verbose:
         print("\n✓ Custom classifier head created:")
-        print("  Layer 1: Linear(25088 -> 512) + ReLU + BatchNorm + Dropout(0.5)")
-        print("  Layer 2: Linear(512 -> 256) + ReLU + BatchNorm + Dropout(0.5)")
+        print(f"  Layer 1: Linear(25088 -> 512) + ReLU + BatchNorm + Dropout({dropout})")
+        print(f"  Layer 2: Linear(512 -> 256) + ReLU + BatchNorm + Dropout({dropout})")
         print(f"  Layer 3: Linear(256 -> {num_classes}) [Output]")
     
     # Count parameters

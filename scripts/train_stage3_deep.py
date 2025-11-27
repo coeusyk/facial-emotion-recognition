@@ -70,12 +70,25 @@ def main():
                         help='Label smoothing factor (0.0-0.2, default: 0.0) from Phase 2 optimization')
     parser.add_argument('--use-optimized-weights', action='store_true',
                         help='Use Phase 2 optimized class weights instead of adaptive weights (configs/class_weights_moderate.pth)')
+    parser.add_argument('--output-dir', type=Path, default=None,
+                        help='Custom output directory for model checkpoint and logs (for grid search)')
+    parser.add_argument('--dropout', type=float, default=None,
+                        help='Dropout rate for classifier (auto-loaded from Stage 2 if not specified)')
     args = parser.parse_args()
+    
+    # Determine output paths (custom or default)
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = args.output_dir / 'emotion_stage3_deep.pth'
+        log_path = args.output_dir / 'emotion_stage3_training.csv'
+    else:
+        checkpoint_path = Config.STAGE3_CHECKPOINT
+        log_path = Config.STAGE3_LOG
     
     # Auto-detect Phase 2 optimized learning rate and weight decay settings
     # NOTE: Optimizer TYPE is now determined by Stage 2 checkpoint for continuity
     phase2_optimizer_config = Path('configs/best_optimizer_config.json')
-    
+
     if phase2_optimizer_config.exists():
         import json
         with open(phase2_optimizer_config, 'r') as f:
@@ -153,6 +166,15 @@ def main():
     
     print(f"  Optimizer: {stage2_optimizer_type.upper()} (will use same type)")
     
+    # Get dropout from checkpoint or CLI (CLI takes precedence)
+    stage2_dropout = checkpoint.get('dropout', Config.CLASSIFIER_DROPOUT)
+    if args.dropout is not None:
+        model_dropout = args.dropout
+        print(f"  Dropout: {model_dropout} (from CLI)")
+    else:
+        model_dropout = stage2_dropout
+        print(f"  Dropout: {model_dropout} (from Stage 2)")
+    
     stage2_val_acc = checkpoint.get('val_acc', 0.0)
     
     # Extract adaptive weight data from Stage 2
@@ -218,8 +240,8 @@ def main():
         # Print comparison
         print_weight_comparison(base_weights, current_weights, emotion_classes)
     
-    # Check if Stage 3 is needed
-    if stage2_val_acc >= 64.0:
+    # Check if Stage 3 is needed (skip prompt in automated mode)
+    if stage2_val_acc >= 64.0 and args.output_dir is None:
         print(f"\n⚠ Stage 2 already achieved {stage2_val_acc:.2f}% (≥64%)")
         print(f"  Stage 3 may provide diminishing returns (<1% improvement)")
         response = input("\nContinue with Stage 3? (y/n): ")
@@ -227,8 +249,8 @@ def main():
             print("Exiting. Use Stage 2 model for best results.")
             sys.exit(0)
     
-    # Build model with frozen features
-    model = build_emotion_model(num_classes=7, pretrained=True, verbose=False)
+    # Build model with frozen features (use same dropout as Stage 2)
+    model = build_emotion_model(num_classes=7, pretrained=True, dropout=model_dropout, verbose=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     print(f"\n✓ Model weights loaded from Stage 2")
@@ -416,7 +438,7 @@ def main():
             best_val_acc = val_acc
             best_epoch = epoch
             
-            checkpoint = {
+            checkpoint_data = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
@@ -427,11 +449,11 @@ def main():
                 'per_class_accuracy': per_class_acc,  # Final per-class metrics
                 'base_weights': base_weights.cpu(),   # Original Effective Number weights
                 'current_weights': current_weights.cpu(),  # Final adapted weights
+                'dropout': model_dropout,  # Track dropout
                 'stage': 'deep'
             }
             
-            save_path = Config.STAGE3_CHECKPOINT
-            torch.save(checkpoint, save_path)
+            torch.save(checkpoint_data, checkpoint_path)
             print(f"\n✓ Best model saved (Val Acc: {val_acc:.2f}%)")
         
         # Early stopping check
@@ -445,13 +467,12 @@ def main():
     print("TRAINING COMPLETE")
     print("="*80)
     
-    log_path = Config.STAGE3_LOG
     tracker.save_to_csv(log_path)
     
     print(f"\n✓ Training completed successfully!")
     print(f"  Best validation accuracy: {best_val_acc:.2f}% (Epoch {best_epoch})")
-    print(f"  Model saved to: {Config.STAGE3_CHECKPOINT}")
-    print(f"  Training log saved to: {Config.STAGE3_LOG}")
+    print(f"  Model saved to: {checkpoint_path}")
+    print(f"  Training log saved to: {log_path}")
     
     print(f"\n{'='*80}")
     print("STAGE 3 SUCCESS CRITERIA CHECK")

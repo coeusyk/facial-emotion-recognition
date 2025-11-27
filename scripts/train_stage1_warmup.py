@@ -60,7 +60,20 @@ def main():
                         help='Label smoothing factor (0.0-0.2, default: 0.0) from Phase 2 optimization')
     parser.add_argument('--use-optimized-weights', action='store_true',
                         help='Use Phase 2 optimized class weights as base instead of Effective Number weights')
+    parser.add_argument('--output-dir', type=Path, default=None,
+                        help='Custom output directory for model checkpoint and logs (for grid search)')
+    parser.add_argument('--dropout', type=float, default=Config.CLASSIFIER_DROPOUT,
+                        help=f'Dropout rate for classifier (default: {Config.CLASSIFIER_DROPOUT})')
     args = parser.parse_args()
+    
+    # Determine output paths (custom or default)
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = args.output_dir / 'emotion_stage1_warmup.pth'
+        log_path = args.output_dir / 'emotion_stage1_training.csv'
+    else:
+        checkpoint_path = Config.STAGE1_CHECKPOINT
+        log_path = Config.STAGE1_LOG
     
     print("=" * 80)
     print("STAGE 1: WARMUP TRAINING - CLASSIFICATION HEAD STABILIZATION")
@@ -140,7 +153,7 @@ def main():
     print("BUILDING MODEL")
     print("="*80)
     
-    model = build_emotion_model(num_classes=7, pretrained=True, verbose=True)
+    model = build_emotion_model(num_classes=7, pretrained=True, dropout=args.dropout, verbose=True)
     model = model.to(device)
     
     # Verify all features are frozen
@@ -245,7 +258,7 @@ def main():
             best_val_acc = val_acc
             best_epoch = epoch
             
-            checkpoint = {
+            checkpoint_data = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
@@ -255,11 +268,11 @@ def main():
                 'val_acc': val_acc,
                 'per_class_accuracy': per_class_acc,  # For adaptive weighting in Stage 2
                 'base_weights': base_weights.cpu(),   # Original Effective Number weights
+                'dropout': args.dropout,  # Track dropout for stage continuity
                 'stage': 'warmup'
             }
             
-            save_path = Config.STAGE1_CHECKPOINT
-            torch.save(checkpoint, save_path)
+            torch.save(checkpoint_data, checkpoint_path)
             print(f"\n✓ Best model saved (Val Acc: {val_acc:.2f}%)")
     
     # Save training history
@@ -267,13 +280,12 @@ def main():
     print("TRAINING COMPLETE")
     print("="*80)
     
-    log_path = Config.STAGE1_LOG
     tracker.save_to_csv(log_path)
     
     print(f"\n✓ Training completed successfully!")
     print(f"  Best validation accuracy: {best_val_acc:.2f}% (Epoch {best_epoch})")
-    print(f"  Model saved to: {Config.STAGE1_CHECKPOINT}")
-    print(f"  Training log saved to: {Config.STAGE1_LOG}")
+    print(f"  Model saved to: {checkpoint_path}")
+    print(f"  Training log saved to: {log_path}")
     
     print(f"\n{'='*80}")
     print("STAGE 1 SUCCESS CRITERIA CHECK")

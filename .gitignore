@@ -3,8 +3,14 @@
 __pycache__/
 .github/
 
-/docs/
+# Documentation (keep images, ignore generated docs)
+/docs/*.md
+!/docs/images/
+
 /data/
 /models/
 /logs/
 kaggle.json
+
+# Grid search results (large output files)
+grid_search_results/
