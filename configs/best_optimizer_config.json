@@ -1,7 +1,9 @@
 {
-  "optimizer": "adam",
+  "optimizer": "adamw",
   "learning_rate": 2e-05,
-  "weight_decay": 0.0001,
-  "description": "Best optimizer config from benchmark (Val Acc: 56.29%)",
-  "usage": "Use these settings for Stage 3 training"
+  "weight_decay": 5e-05,
+  "best_val_acc": 60.4667363288053,
+  "best_epoch": 10,
+  "description": "Best optimizer config from benchmark (Best Val Acc: 60.47%)",
+  "usage": "Automatically applied to Stage 3 training unless overridden with --lr/--weight-decay"
 }

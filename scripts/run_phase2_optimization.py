@@ -3,28 +3,29 @@
 Phase 2 Master Integration Script
 ===================================
 
-Orchestrates all 6 optimization components in sequence:
+Orchestrates all 7 optimization components in sequence:
     1. Class Weight Adjustment
     2. Threshold Optimization
     3. Confusion-Aware Augmentation
     4. Label Smoothing (already integrated in training scripts)
-    5. Optimizer Benchmark
+    5. Stage 3 Optimizer Benchmark
+    5B. Stage 2 Optimizer Benchmark
     6. Grid Search (optional, very expensive)
 
 Usage:
     python scripts/run_phase2_optimization.py [--components COMPONENTS]
 
 Examples:
-    # Run all components
+    # Run all components (except grid search)
     python scripts/run_phase2_optimization.py
 
     # Run specific components only
-    python scripts/run_phase2_optimization.py --components 1,2,5
+    python scripts/run_phase2_optimization.py --components 1,2,5,5b
 
-    # Skip grid search (recommended)
-    python scripts/run_phase2_optimization.py --components 1,2,3,4,5
+    # Run only optimizer benchmarks
+    python scripts/run_phase2_optimization.py --components 5,5b
 
-Expected Total Runtime: 18-24 hours (excluding grid search)
+Expected Total Runtime: 20-26 hours (excluding grid search)
 Expected Total Gain: +10-15% accuracy (53.76% → 63-68%)
 
 Author: FER-2013 Optimization Pipeline
@@ -255,6 +256,62 @@ COMPONENT 5: OPTIMIZER BENCHMARK""")
     return {'status': 'completed', 'best_config': best_config['name']}
 
 
+def run_component_5b_stage2_optimizer(checkpoint_path: Path, data_dir: Path, output_dir: Path, device):
+    """
+    Component 5B: Stage 2 Optimizer Benchmark
+    Expected gain: +1-2% accuracy
+    Runtime: ~2 hours (8 configs × 15 min)
+    """
+    print(f"""\n{'='*80}
+COMPONENT 5B: STAGE 2 OPTIMIZER BENCHMARK""")
+    print("=" * 80)
+    
+    import torch
+    import torch.nn as nn
+    from src.data.data_pipeline import create_dataloaders, calculate_class_weights
+    from src.models.vgg16_emotion import build_emotion_model, unfreeze_vgg16_blocks
+    from src.optimization.stage2_optimizer_benchmark import run_stage2_optimizer_benchmark
+    
+    # Load data
+    print("Loading data...")
+    train_loader, val_loader, _, class_names = create_dataloaders(
+        data_dir,
+        batch_size=64,
+        num_workers=4
+    )
+    
+    # Load model from Stage 1
+    print("Loading Stage 1 model...")
+    model = build_emotion_model(num_classes=7, pretrained=True, verbose=False)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Unfreeze blocks 4-5 for Stage 2
+    model = unfreeze_vgg16_blocks(model, blocks_to_unfreeze=[4, 5], verbose=False)
+    model = model.to(device)
+    
+    # Get class weights
+    class_weights = calculate_class_weights(data_dir / 'train')
+    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+    
+    # Run benchmark
+    df, best_config = run_stage2_optimizer_benchmark(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        device=device,
+        num_epochs=10,
+        output_dir=output_dir / 'stage2_optimizers'
+    )
+    
+    print(f"""\n✓ Component 5B complete
+  Outputs: {output_dir / 'stage2_optimizers'}""")
+    print("  Best config saved: configs/best_stage2_optimizer_config.json")
+    
+    return {'status': 'completed', 'best_config': best_config['name']}
+
+
 def run_component_6_grid_search():
     """
     Component 6: Grid Search
@@ -288,20 +345,29 @@ COMPONENT 6: GRID SEARCH
 
 def main():
     parser = argparse.ArgumentParser(description='Phase 2 Optimization Pipeline')
-    parser.add_argument('--components', type=str, default='1,2,3,4,5',
-                       help='Components to run (comma-separated, e.g., "1,2,5"). Default: all except 6 (grid search)')
+    parser.add_argument('--components', type=str, default='1,2,3,4,5,5b',
+                       help='Components to run (comma-separated, e.g., "1,2,5,5b"). Default: all except 6 (grid search)')
     parser.add_argument('--data-dir', type=Path, default=Path('data/raw'),
                        help='Path to dataset directory')
     parser.add_argument('--checkpoint', type=Path, default=Path('models/emotion_stage3_deep.pth'),
                        help='Path to trained model checkpoint (for components 2 and 5)')
+    parser.add_argument('--stage1-checkpoint', type=Path, default=Path('models/emotion_stage1_warmup.pth'),
+                       help='Path to Stage 1 checkpoint (for component 5b)')
     parser.add_argument('--stage2-checkpoint', type=Path, default=Path('models/emotion_stage2_progressive.pth'),
                        help='Path to Stage 2 checkpoint (for component 5)')
     parser.add_argument('--output-dir', type=Path, default=Path('results/optimization'),
                        help='Output directory for all results')
     args = parser.parse_args()
     
-    # Parse components to run
-    components_to_run = [int(c.strip()) for c in args.components.split(',')]
+    # Parse components to run (handle 5b as a special string)
+    components_str = args.components.lower()
+    components_to_run = []
+    for c in components_str.split(','):
+        c = c.strip()
+        if c == '5b':
+            components_to_run.append('5b')
+        else:
+            components_to_run.append(int(c))
     
     print(f"""{'='*80}
 PHASE 2: DATA-DRIVEN OPTIMIZATION PIPELINE""")
@@ -322,38 +388,52 @@ Data directory: {args.data_dir}""")
     # Track results
     results = {}
     
-    # Run components
-    if 1 in components_to_run:
-        results['component_1'] = run_component_1_class_weights(args.data_dir, args.output_dir)
+    # Define component execution order (1, 2, 3, 4, 5b, 5, 6)
+    component_order = [1, 2, 3, 4, '5b', 5, 6]
     
-    if 2 in components_to_run:
-        if not args.checkpoint.exists():
-            print(f"""\n✗ Error: Checkpoint not found: {args.checkpoint}
+    # Run components in strict order
+    for component in component_order:
+        if component == 1 and 1 in components_to_run:
+            results['component_1'] = run_component_1_class_weights(args.data_dir, args.output_dir)
+        
+        elif component == 2 and 2 in components_to_run:
+            if not args.checkpoint.exists():
+                print(f"""\n✗ Error: Checkpoint not found: {args.checkpoint}
   Skipping Component 2 (Threshold Optimization)""")
-            results['component_2'] = {'status': 'skipped', 'reason': 'checkpoint not found'}
-        else:
-            results['component_2'] = run_component_2_thresholds(
-                args.checkpoint, args.data_dir, args.output_dir, device
-            )
-    
-    if 3 in components_to_run:
-        results['component_3'] = run_component_3_augmentation(args.data_dir)
-    
-    if 4 in components_to_run:
-        results['component_4'] = run_component_4_label_smoothing()
-    
-    if 5 in components_to_run:
-        if not args.stage2_checkpoint.exists():
-            print(f"""\n✗ Error: Stage 2 checkpoint not found: {args.stage2_checkpoint}
-  Skipping Component 5 (Optimizer Benchmark)""")
-            results['component_5'] = {'status': 'skipped', 'reason': 'checkpoint not found'}
-        else:
-            results['component_5'] = run_component_5_optimizer(
-                args.stage2_checkpoint, args.data_dir, args.output_dir, device
-            )
-    
-    if 6 in components_to_run:
-        results['component_6'] = run_component_6_grid_search()
+                results['component_2'] = {'status': 'skipped', 'reason': 'checkpoint not found'}
+            else:
+                results['component_2'] = run_component_2_thresholds(
+                    args.checkpoint, args.data_dir, args.output_dir, device
+                )
+        
+        elif component == 3 and 3 in components_to_run:
+            results['component_3'] = run_component_3_augmentation(args.data_dir)
+        
+        elif component == 4 and 4 in components_to_run:
+            results['component_4'] = run_component_4_label_smoothing()
+        
+        elif component == '5b' and '5b' in components_to_run:
+            if not args.stage1_checkpoint.exists():
+                print(f"""\n✗ Error: Stage 1 checkpoint not found: {args.stage1_checkpoint}
+  Skipping Component 5B (Stage 2 Optimizer Benchmark)""")
+                results['component_5b'] = {'status': 'skipped', 'reason': 'checkpoint not found'}
+            else:
+                results['component_5b'] = run_component_5b_stage2_optimizer(
+                    args.stage1_checkpoint, args.data_dir, args.output_dir, device
+                )
+        
+        elif component == 5 and 5 in components_to_run:
+            if not args.stage2_checkpoint.exists():
+                print(f"""\n✗ Error: Stage 2 checkpoint not found: {args.stage2_checkpoint}
+  Skipping Component 5 (Stage 3 Optimizer Benchmark)""")
+                results['component_5'] = {'status': 'skipped', 'reason': 'checkpoint not found'}
+            else:
+                results['component_5'] = run_component_5_optimizer(
+                    args.stage2_checkpoint, args.data_dir, args.output_dir, device
+                )
+        
+        elif component == 6 and 6 in components_to_run:
+            results['component_6'] = run_component_6_grid_search()
     
     # Save summary
     summary_path = args.output_dir / 'phase2_summary.json'

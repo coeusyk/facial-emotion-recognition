@@ -18,24 +18,25 @@ PER-CLASS OPTIMAL THRESHOLDS
 
 Emotion      | Baseline |  Optimal |   Change |  Best F1 | Reasoning                     
 ------------------------------------------------------------------------------------------------------------------------
-angry        |     0.50 |     0.30 |    -0.20 |    0.355 | Low recall (31.3%)            
-disgust      |     0.50 |     0.55 |    +0.05 |    0.368 | PARADOX FIX: Reduce false positives
-fear         |     0.50 |     0.30 |    -0.20 |    0.309 | Very low recall (22.3%)       
-happy        |     0.50 |     0.30 |    -0.20 |    0.795 | Balanced performance          
-neutral      |     0.50 |     0.30 |    -0.20 |    0.494 | Slight over-prediction        
-sad          |     0.50 |     0.30 |    -0.20 |    0.422 | Over-predicted                
-surprise     |     0.50 |     0.40 |    -0.10 |    0.698 | Good balance                  
+angry        |     0.50 |     0.30 |    -0.20 |    0.497 | Low recall (31.3%)            
+disgust      |     0.50 |     0.36 |    -0.14 |    0.536 | PARADOX FIX: Reduce false positives
+fear         |     0.50 |     0.30 |    -0.20 |    0.425 | Very low recall (22.3%)       
+happy        |     0.50 |     0.32 |    -0.18 |    0.842 | Balanced performance          
+neutral      |     0.50 |     0.30 |    -0.20 |    0.594 | Slight over-prediction        
+sad          |     0.50 |     0.30 |    -0.20 |    0.491 | Over-predicted                
+surprise     |     0.50 |     0.50 |    +0.00 |    0.750 | Good balance                  
 
 ================================================================================
 IMPACT ANALYSIS
 ================================================================================
 
-Significant threshold changes (|change| > 0.05): 7/7
+Significant threshold changes (|change| > 0.05): 6/7
 
 Major Changes:
   - Angry: 0.50 -> 0.30 (DECREASE)
+  - Disgust: 0.50 -> 0.36 (DECREASE)
   - Fear: 0.50 -> 0.30 (DECREASE)
-  - Happy: 0.50 -> 0.30 (DECREASE)
+  - Happy: 0.50 -> 0.32 (DECREASE)
   - Neutral: 0.50 -> 0.30 (DECREASE)
   - Sad: 0.50 -> 0.30 (DECREASE)
 

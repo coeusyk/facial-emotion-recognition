@@ -1,12 +1,12 @@
 {
   "thresholds": {
     "angry": 0.3,
-    "disgust": 0.5500000000000003,
+    "disgust": 0.36000000000000004,
     "fear": 0.3,
-    "happy": 0.3,
+    "happy": 0.32,
     "neutral": 0.3,
     "sad": 0.3,
-    "surprise": 0.4000000000000001
+    "surprise": 0.5000000000000002
   },
   "description": "Optimal per-class decision thresholds (F1-optimized)",
   "baseline": 0.5,

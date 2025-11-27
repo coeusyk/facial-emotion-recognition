@@ -64,11 +64,52 @@ def main():
                         help=f'Weight decay (default: {Config.STAGE2_WEIGHT_DECAY})')
     parser.add_argument('--early-stop-patience', type=int, default=Config.STAGE2_EARLY_STOP_PATIENCE,
                         help=f'Early stopping patience (default: {Config.STAGE2_EARLY_STOP_PATIENCE})')
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing factor (0.0-0.2, default: 0.0) from Phase 2 optimization')
     args = parser.parse_args()
+    
+    # Auto-detect Phase 2 optimized settings for Stage 2
+    import json
+    phase2_config_path = Path('configs/best_stage2_optimizer_config.json')
+    lr_source = "default"
+    wd_source = "default"
+    optimizer_type = "adam"
+    
+    if phase2_config_path.exists():
+        try:
+            with open(phase2_config_path, 'r') as f:
+                phase2_config = json.load(f)
+            
+            # Auto-apply LR if not overridden by user
+            if args.lr == Config.STAGE2_LR:  # User didn't override
+                args.lr = phase2_config['learning_rate']
+                lr_source = f"Phase 2 (best: {phase2_config.get('best_val_acc', 0.0):.2f}%)"
+            
+            # Auto-apply weight decay if not overridden
+            if args.weight_decay == Config.STAGE2_WEIGHT_DECAY:
+                args.weight_decay = phase2_config['weight_decay']
+                wd_source = "Phase 2"
+            
+            # Get optimizer type (for display)
+            optimizer_type = phase2_config.get('optimizer', 'adam')
+            
+        except Exception as e:
+            print(f"\n⚠ Warning: Could not load Phase 2 config: {e}")
+            print("  Using default Stage 2 hyperparameters")
     
     print("=" * 80)
     print("STAGE 2: PROGRESSIVE FINE-TUNING - PARTIAL BACKBONE ADAPTATION")
     print("=" * 80)
+    
+    # Display auto-detected settings
+    if lr_source != "default" or wd_source != "default":
+        print("\n📊 Phase 2 Auto-Optimization:")
+        if lr_source != "default":
+            print(f"  ✓ Auto-detected learning rate: {args.lr:.0e} ({lr_source})")
+        if wd_source != "default":
+            print(f"  ✓ Auto-detected weight decay: {args.weight_decay:.0e} ({wd_source})")
+        print(f"  ✓ Optimizer: {optimizer_type.upper()}")
+        print("  → To override: use --lr <value> --weight-decay <value>")
     
     # Device setup - REQUIRE CUDA
     if not torch.cuda.is_available():
@@ -115,6 +156,9 @@ def main():
     print(f"  Stage: {checkpoint.get('stage', 'unknown')}")
     print(f"  Epoch: {checkpoint.get('epoch', 'unknown')}")
     print(f"  Val Acc: {checkpoint.get('val_acc', 0.0):.2f}%")
+    
+    # Store Stage 1 accuracy for comparison at end
+    stage1_val_acc = checkpoint.get('val_acc', 0.0)
     
     # Extract adaptive weight data from Stage 1
     stage1_per_class_acc = checkpoint.get('per_class_accuracy', {})
@@ -183,8 +227,28 @@ def main():
         weight_decay=args.weight_decay
     )
     
-    # Load optimizer state from Stage 1 (optional, for continuity)
-    # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    # Load optimizer state from Stage 1 for smooth transition
+    stage1_optimizer_state = checkpoint.get('optimizer_state_dict', None)
+    optimizer_state_loaded = False
+    
+    if stage1_optimizer_state is not None:
+        try:
+            optimizer.load_state_dict(stage1_optimizer_state)
+            optimizer_state_loaded = True
+            
+            # Update learning rate to Stage 2 target
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr
+                param_group['weight_decay'] = args.weight_decay
+            
+            print(f"\n✓ Optimizer state loaded from Stage 1 (smooth transition)")
+            print(f"  Momentum history preserved, LR updated to: {args.lr:.0e}")
+            
+        except Exception as e:
+            print(f"\n⚠ Could not load optimizer state: {e}")
+            print(f"  Starting with fresh optimizer")
+    else:
+        print(f"\n⚠ No optimizer state in Stage 1 checkpoint")
     
     # LR Scheduler: ReduceLROnPlateau
     scheduler = ReduceLROnPlateau(
@@ -276,6 +340,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'optimizer_type': 'adam',  # Track optimizer for stage continuity
                 'train_loss': train_loss,
                 'val_loss': val_loss,
                 'val_acc': val_acc,
@@ -314,10 +379,9 @@ def main():
     
     target_min = Config.STAGE2_TARGET_VAL_ACC_MIN
     target_max = Config.STAGE2_TARGET_VAL_ACC_MAX
-    stage1_acc = checkpoint.get('val_acc', 0.0)
-    improvement = best_val_acc - stage1_acc
+    improvement = best_val_acc - stage1_val_acc
     
-    print(f"  Stage 1 Val Acc: {stage1_acc:.2f}%")
+    print(f"  Stage 1 Val Acc: {stage1_val_acc:.2f}%")
     print(f"  Stage 2 Val Acc: {best_val_acc:.2f}%")
     print(f"  Improvement: +{improvement:.2f}%")
     

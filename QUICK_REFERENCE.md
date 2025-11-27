@@ -1,6 +1,40 @@
 # Quick Reference - PyTorch Facial Emotion Recognition
 
-## 🚀 Essential Commands (In Order)
+## 🚀 Phase 2 Optimized Training (Recommended - 63-68% Accuracy)
+
+**Prerequisites: Generate Phase 2 optimized weights (one-time, 2-3 hours)**
+```powershell
+python .\scripts\run_phase2_optimization.py --components 1
+```
+
+**Full cascading optimization pipeline:**
+```powershell
+# Stage 1: Foundation with Phase 2 optimized weights
+python .\scripts\train\train_stage1_warmup.py --label-smoothing 0.1 --use-optimized-weights
+
+# Stage 2: Inherits Phase 2 base + adaptive adjustments  
+python .\scripts\train\train_stage2_progressive.py --label-smoothing 0.1
+
+# Stage 3: Refined weights + optimal learning rate
+python .\scripts\train\train_stage3_deep.py --label-smoothing 0.1 --lr 2e-5
+```
+
+**Expected improvement:** 53.76% baseline → 63-68% (+10-15%)
+
+## 📋 Baseline Training (No Phase 2 - 53-56% Accuracy)
+
+```powershell
+# Stage 1: Standard Effective Number weights
+python .\scripts\train\train_stage1_warmup.py
+
+# Stage 2: Adaptive adjustments
+python .\scripts\train\train_stage2_progressive.py
+
+# Stage 3: Adaptive adjustments  
+python .\scripts\train\train_stage3_deep.py
+```
+
+## 🎯 Essential Commands (In Order)
 
 ```powershell
 # 1. Verify GPU and dependencies

@@ -1,27 +1,27 @@
 """
-Component 5: Optimizer & Learning Rate Tuning
-==============================================
+Component 5B: Stage 2 Optimizer & Learning Rate Tuning
+========================================================
 
 Purpose:
-    Compare Adam vs AdamW and find optimal Stage 3 learning rate.
+    Compare Adam vs AdamW and find optimal Stage 2 learning rate.
     
-Current Setup (from Phase 1):
+Current Setup (from config.py):
     - Optimizer: Adam
-    - Stage 3 LR: 5e-6
+    - Stage 2 LR: 1e-5
     - Weight decay: 1e-4
-    - Validation loss: 1.32 (suggests suboptimal convergence)
 
 Hypotheses:
-    - LR might be too conservative (5e-6)
-    - AdamW might handle weight decay better for VGG16's 138M parameters
-    - Higher LR (1e-5 or 2e-5) could improve convergence
+    - Current LR (1e-5) might not be optimal for Stage 2 dynamics
+    - Stage 2 unfreezes blocks 4-5 (~40% trainable) vs Stage 3's ~90%
+    - AdamW might handle weight decay better
+    - Stage 2 might benefit from different LR than Stage 3
 
 Test Matrix:
-    - Adam with [5e-6, 1e-5, 2e-5]
-    - AdamW with [5e-6, 1e-5, 2e-5]
-    Total: 6 configurations
+    - Adam with [5e-6, 1e-5, 2e-5, 5e-5]
+    - AdamW with [5e-6, 1e-5, 2e-5, 5e-5]
+    Total: 8 configurations
 
-Expected Gain: +2-3% accuracy, -0.15 loss
+Expected Gain: +1-3% accuracy over default Stage 2 LR
 
 Author: FER-2013 Optimization Pipeline
 """
@@ -34,11 +34,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
-from typing import Dict
+from typing import Dict, Tuple
 from copy import deepcopy
 
 
-def run_optimizer_benchmark(
+def run_stage2_optimizer_benchmark(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
@@ -46,12 +46,12 @@ def run_optimizer_benchmark(
     device: torch.device,
     num_epochs: int = 10,
     output_dir: Path = None
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict]:
     """
-    Benchmark different optimizers and learning rates on Stage 3 training.
+    Benchmark different optimizers and learning rates for Stage 2 training.
     
     Args:
-        model: VGG16 emotion model (Stage 2 checkpoint loaded)
+        model: VGG16 emotion model (Stage 1 checkpoint loaded, blocks 4-5 unfrozen)
         train_loader: Training data loader
         val_loader: Validation data loader
         criterion: Loss function (with class weights)
@@ -60,27 +60,31 @@ def run_optimizer_benchmark(
         output_dir: Where to save results
     
     Returns:
-        DataFrame with benchmark results
+        Tuple of (DataFrame with benchmark results, best config dict)
     """
     print(f"""{'='*80}
-COMPONENT 5: OPTIMIZER BENCHMARK
+COMPONENT 5B: STAGE 2 OPTIMIZER BENCHMARK
 {'='*80}
 Number of epochs per config: {num_epochs}""")
-    print(f"Total configurations: 6")
+    print(f"Total configurations: 8")
     
-    # Define optimizer configurations
+    # Define optimizer configurations for Stage 2
     configs = [
-        # Current baseline
+        # Lower LR variants
         {'name': 'Adam_5e-6', 'optimizer': 'adam', 'lr': 5e-6, 'weight_decay': 1e-4},
         
-        # Higher LR variants for Adam
+        # Current baseline
         {'name': 'Adam_1e-5', 'optimizer': 'adam', 'lr': 1e-5, 'weight_decay': 1e-4},
+        
+        # Higher LR variants for Adam
         {'name': 'Adam_2e-5', 'optimizer': 'adam', 'lr': 2e-5, 'weight_decay': 1e-4},
+        {'name': 'Adam_5e-5', 'optimizer': 'adam', 'lr': 5e-5, 'weight_decay': 1e-4},
         
         # AdamW variants (better weight decay handling)
         {'name': 'AdamW_5e-6', 'optimizer': 'adamw', 'lr': 5e-6, 'weight_decay': 5e-5},
         {'name': 'AdamW_1e-5', 'optimizer': 'adamw', 'lr': 1e-5, 'weight_decay': 5e-5},
         {'name': 'AdamW_2e-5', 'optimizer': 'adamw', 'lr': 2e-5, 'weight_decay': 5e-5},
+        {'name': 'AdamW_5e-5', 'optimizer': 'adamw', 'lr': 5e-5, 'weight_decay': 5e-5},
     ]
     
     results = []
@@ -92,7 +96,7 @@ Number of epochs per config: {num_epochs}""")
     
     for config_idx, config in enumerate(configs, 1):
         print(f"""\n{'='*80}
-TESTING CONFIG {config_idx}/6: {config['name']}
+TESTING CONFIG {config_idx}/8: {config['name']}
 {'='*80}
   Optimizer: {config['optimizer'].upper()}
   Learning rate: {config['lr']:.0e}
@@ -121,8 +125,8 @@ TESTING CONFIG {config_idx}/6: {config['name']}
         scheduler = ReduceLROnPlateau(
             optimizer,
             mode='min',
-            factor=0.3,
-            patience=3
+            factor=0.5,
+            patience=5
         )
         
         # Training loop
@@ -236,13 +240,13 @@ TESTING CONFIG {config_idx}/6: {config['name']}
     
     # Display summary
     print(f"""\n{'='*80}
-OPTIMIZER BENCHMARK SUMMARY
+STAGE 2 OPTIMIZER BENCHMARK SUMMARY
 {'='*80}
 
 {df.to_string(index=False)}""")
     
     print(f"""\n{'='*80}
-BEST CONFIGURATION
+BEST CONFIGURATION FOR STAGE 2
 {'='*80}
 Config: {best_config['name']}
   Optimizer: {best_config['optimizer'].upper()}
@@ -259,12 +263,12 @@ This reflects real training with early stopping and best checkpoint saving.""")
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Save CSV
-        csv_path = output_dir / 'optimizer_benchmark_results.csv'
+        csv_path = output_dir / 'stage2_optimizer_benchmark_results.csv'
         df.to_csv(csv_path, index=False)
         print(f"\n✓ Results saved to: {csv_path}")
         
         # Save best config JSON
-        best_config_path = Path('configs/best_optimizer_config.json')
+        best_config_path = Path('configs/best_stage2_optimizer_config.json')
         best_config_path.parent.mkdir(parents=True, exist_ok=True)
         
         best_config_data = {
@@ -273,8 +277,8 @@ This reflects real training with early stopping and best checkpoint saving.""")
             'weight_decay': best_config['weight_decay'],
             'best_val_acc': best_overall_acc,
             'best_epoch': best_config.get('best_epoch', 0),
-            'description': f'Best optimizer config from benchmark (Best Val Acc: {best_overall_acc:.2f}%)',
-            'usage': 'Automatically applied to Stage 3 training unless overridden with --lr/--weight-decay'
+            'description': f'Best Stage 2 optimizer config from benchmark (Best Val Acc: {best_overall_acc:.2f}%)',
+            'usage': 'Automatically applied to Stage 2 training unless overridden with --lr/--weight-decay'
         }
         
         with open(best_config_path, 'w') as f:
@@ -282,146 +286,50 @@ This reflects real training with early stopping and best checkpoint saving.""")
         
         print(f"✓ Best config saved to: {best_config_path}")
         
-        # Generate visualizations
-        _visualize_optimizer_results(df, output_dir)
+        # Generate report
+        save_stage2_benchmark_report(df, best_config, best_overall_acc, output_dir)
     
     return df, best_config
 
 
-def _visualize_optimizer_results(df: pd.DataFrame, output_dir: Path):
-    """Create visualization of optimizer benchmark results."""
-    
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
-    # Plot 1: Validation Accuracy
-    ax1 = axes[0, 0]
-    colors = ['#2E86AB' if 'Adam_' in name else '#A23B72' 
-              for name in df['config']]
-    
-    bars1 = ax1.bar(range(len(df)), df['final_val_acc'], color=colors, alpha=0.8)
-    ax1.set_xlabel('Configuration', fontsize=12, fontweight='bold')
-    ax1.set_ylabel('Validation Accuracy (%)', fontsize=12, fontweight='bold')
-    ax1.set_title('Final Validation Accuracy by Config', fontsize=14, fontweight='bold')
-    ax1.set_xticks(range(len(df)))
-    ax1.set_xticklabels(df['config'], rotation=45, ha='right')
-    ax1.grid(axis='y', alpha=0.3)
-    
-    # Add value labels
-    for i, (bar, val) in enumerate(zip(bars1, df['final_val_acc'])):
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.2,
-                f'{val:.2f}%', ha='center', va='bottom', fontsize=10)
-    
-    # Plot 2: Validation Loss
-    ax2 = axes[0, 1]
-    bars2 = ax2.bar(range(len(df)), df['final_val_loss'], color=colors, alpha=0.8)
-    ax2.set_xlabel('Configuration', fontsize=12, fontweight='bold')
-    ax2.set_ylabel('Validation Loss', fontsize=12, fontweight='bold')
-    ax2.set_title('Final Validation Loss by Config', fontsize=14, fontweight='bold')
-    ax2.set_xticks(range(len(df)))
-    ax2.set_xticklabels(df['config'], rotation=45, ha='right')
-    ax2.grid(axis='y', alpha=0.3)
-    
-    # Add value labels
-    for bar, val in zip(bars2, df['final_val_loss']):
-        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                f'{val:.3f}', ha='center', va='bottom', fontsize=10)
-    
-    # Plot 3: Adam vs AdamW comparison
-    ax3 = axes[1, 0]
-    adam_df = df[df['optimizer'] == 'adam']
-    adamw_df = df[df['optimizer'] == 'adamw']
-    
-    x_adam = [f"{lr:.0e}" for lr in adam_df['learning_rate']]
-    x_adamw = [f"{lr:.0e}" for lr in adamw_df['learning_rate']]
-    
-    x_pos = range(len(x_adam))
-    width = 0.35
-    
-    bars_adam = ax3.bar([p - width/2 for p in x_pos], adam_df['final_val_acc'], 
-                        width, label='Adam', color='#2E86AB', alpha=0.8)
-    bars_adamw = ax3.bar([p + width/2 for p in x_pos], adamw_df['final_val_acc'], 
-                         width, label='AdamW', color='#A23B72', alpha=0.8)
-    
-    ax3.set_xlabel('Learning Rate', fontsize=12, fontweight='bold')
-    ax3.set_ylabel('Validation Accuracy (%)', fontsize=12, fontweight='bold')
-    ax3.set_title('Adam vs AdamW Comparison', fontsize=14, fontweight='bold')
-    ax3.set_xticks(x_pos)
-    ax3.set_xticklabels(x_adam)
-    ax3.legend()
-    ax3.grid(axis='y', alpha=0.3)
-    
-    # Plot 4: Convergence indicator
-    ax4 = axes[1, 1]
-    converged_counts = df.groupby('optimizer')['converged'].sum()
-    
-    ax4.bar(converged_counts.index, converged_counts.values, 
-           color=['#2E86AB', '#A23B72'], alpha=0.8)
-    ax4.set_xlabel('Optimizer', fontsize=12, fontweight='bold')
-    ax4.set_ylabel('Converged Configs (out of 3)', fontsize=12, fontweight='bold')
-    ax4.set_title('Convergence by Optimizer Type', fontsize=14, fontweight='bold')
-    ax4.set_ylim(0, 3.5)
-    ax4.grid(axis='y', alpha=0.3)
-    
-    # Add value labels
-    for i, (opt, count) in enumerate(converged_counts.items()):
-        ax4.text(i, count + 0.1, str(count), ha='center', va='bottom', 
-                fontsize=12, fontweight='bold')
-    
-    plt.tight_layout()
-    
-    # Save
-    save_path = output_dir / 'optimizer_benchmark_comparison.png'
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"✓ Visualization saved to: {save_path}")
-
-
-def save_benchmark_results(df: pd.DataFrame, best_config: Dict, output_dir: Path):
-    """
-    Generate detailed benchmark report.
-    
-    Args:
-        df: Results DataFrame
-        best_config: Best configuration dict
-        output_dir: Where to save report
-    """
+def save_stage2_benchmark_report(df: pd.DataFrame, best_config: Dict, best_val_acc: float, output_dir: Path):
+    """Generate detailed benchmark report for Stage 2."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    report_path = output_dir / 'optimizer_benchmark_report.txt'
+    report_path = output_dir / 'stage2_optimizer_benchmark_report.txt'
     
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("=" * 80 + "\n")
-        f.write("OPTIMIZER & LEARNING RATE BENCHMARK REPORT\n")
+        f.write("STAGE 2 OPTIMIZER & LEARNING RATE BENCHMARK REPORT\n")
         f.write("=" * 80 + "\n\n")
         
         f.write("Objective:\n")
-        f.write("  Compare Adam vs AdamW with different learning rates for Stage 3 training.\n")
-        f.write("  Current baseline: Adam with LR=5e-6, producing Val Loss=1.32\n\n")
+        f.write("  Compare Adam vs AdamW with different learning rates for Stage 2 training.\n")
+        f.write("  Current baseline: Adam with LR=1e-5\n\n")
         
         f.write("Hypothesis:\n")
-        f.write("  - LR too conservative (5e-6) → slow convergence\n")
-        f.write("  - AdamW better weight decay handling for 138M parameters\n")
-        f.write("  - Higher LR (1e-5, 2e-5) could improve final performance\n\n")
+        f.write("  - Stage 2 has different dynamics than Stage 3 (~40% vs ~90% trainable)\n")
+        f.write("  - Current LR (1e-5) might not be optimal\n")
+        f.write("  - AdamW might handle weight decay better\n\n")
         
         f.write("=" * 80 + "\n")
         f.write("RESULTS SUMMARY\n")
         f.write("=" * 80 + "\n\n")
         
-        # Sort by val_acc
-        df_sorted = df.sort_values('final_val_acc', ascending=False)
+        # Sort by best_val_acc
+        df_sorted = df.sort_values('best_val_acc', ascending=False)
         
-        f.write(f"{'Rank':<6} | {'Config':<12} | {'Val Loss':>10} | {'Val Acc':>10} | {'Converged':>10}\n")
+        f.write(f"{'Rank':<6} | {'Config':<12} | {'Best Val Acc':>13} | {'Best Epoch':>10} | {'Converged':>10}\n")
         f.write("-" * 80 + "\n")
         
         for rank, (_, row) in enumerate(df_sorted.iterrows(), 1):
             marker = "***" if rank == 1 else ""
-            f.write(f"{rank:<6} | {row['config']:<12} | {row['final_val_loss']:10.4f} | "
-                   f"{row['final_val_acc']:9.2f}% | {str(row['converged']):>10} {marker}\n")
+            f.write(f"{rank:<6} | {row['config']:<12} | {row['best_val_acc']:>11.2f}% | "
+                   f"{row['best_epoch']:>10} | {str(row['converged']):>10} {marker}\n")
         
         f.write("\n" + "=" * 80 + "\n")
-        f.write("BEST CONFIGURATION\n")
+        f.write("BEST CONFIGURATION FOR STAGE 2\n")
         f.write("=" * 80 + "\n\n")
         
         f.write(f"Config: {best_config['name']}\n")
@@ -431,41 +339,40 @@ def save_benchmark_results(df: pd.DataFrame, best_config: Dict, output_dir: Path
         
         best_row = df[df['config'] == best_config['name']].iloc[0]
         f.write(f"Performance:\n")
-        f.write(f"  Validation Loss: {best_row['final_val_loss']:.4f}\n")
-        f.write(f"  Validation Accuracy: {best_row['final_val_acc']:.2f}%\n")
+        f.write(f"  Best Validation Accuracy: {best_row['best_val_acc']:.2f}%\n")
+        f.write(f"  Best Epoch: {best_row['best_epoch']}\n")
         f.write(f"  Converged: {'Yes' if best_row['converged'] else 'No'}\n\n")
         
         # Comparison to baseline
-        baseline_row = df[df['config'] == 'Adam_5e-6'].iloc[0]
-        f.write("Improvement over baseline (Adam_5e-6):\n")
-        f.write(f"  Val Loss: {baseline_row['final_val_loss']:.4f} -> {best_row['final_val_loss']:.4f} "
-               f"({best_row['final_val_loss'] - baseline_row['final_val_loss']:+.4f})\n")
-        f.write(f"  Val Acc: {baseline_row['final_val_acc']:.2f}% -> {best_row['final_val_acc']:.2f}% "
-               f"({best_row['final_val_acc'] - baseline_row['final_val_acc']:+.2f}%)\n\n")
+        baseline_row = df[df['config'] == 'Adam_1e-5'].iloc[0]
+        f.write("Improvement over baseline (Adam_1e-5):\n")
+        f.write(f"  Best Val Acc: {baseline_row['best_val_acc']:.2f}% -> {best_row['best_val_acc']:.2f}% "
+               f"({best_row['best_val_acc'] - baseline_row['best_val_acc']:+.2f}%)\n\n")
         
         f.write("=" * 80 + "\n")
         f.write("RECOMMENDATIONS\n")
         f.write("=" * 80 + "\n\n")
         
-        f.write("1. Use the best configuration for Stage 3 training:\n")
-        f.write(f"   python scripts/train_stage3_deep.py \\\n")
-        f.write(f"     --lr {best_config['lr']:.0e} \\\n")
-        f.write(f"     --weight-decay {best_config['weight_decay']:.0e}\n\n")
+        f.write("1. Stage 2 training will automatically use these settings:\n")
+        f.write(f"   python scripts/train_stage2_progressive.py\n")
+        f.write(f"   (Auto-loads lr={best_config['lr']:.0e}, wd={best_config['weight_decay']:.0e})\n\n")
+        
+        f.write("2. To override auto-detection:\n")
+        f.write(f"   python scripts/train_stage2_progressive.py --lr <custom_lr> --weight-decay <custom_wd>\n\n")
         
         if best_config['optimizer'] == 'adamw':
-            f.write("2. Switch to AdamW optimizer in training script:\n")
-            f.write("   optimizer = optim.AdamW(model.parameters(), ...)\n\n")
+            f.write("3. Best optimizer is AdamW (better weight decay handling)\n\n")
         
-        f.write("3. Expected improvements:\n")
-        f.write(f"   - Better convergence (loss reduction)\n")
-        f.write(f"   - Improved validation accuracy\n")
-        f.write(f"   - More stable training\n\n")
+        f.write("4. Expected improvements:\n")
+        f.write(f"   - Better Stage 2 convergence\n")
+        f.write(f"   - Improved Stage 2 checkpoint for Stage 3\n")
+        f.write(f"   - Cascading benefits through training pipeline\n\n")
     
     print(f"✓ Detailed report saved to: {report_path}")
 
 
 def main():
-    """Example usage of optimizer benchmark."""
+    """Example usage of Stage 2 optimizer benchmark."""
     from pathlib import Path
     import sys
     
@@ -478,17 +385,17 @@ def main():
     from src.models.vgg16_emotion import build_emotion_model, unfreeze_vgg16_blocks
     
     print(f"""{'='*80}
-COMPONENT 5: OPTIMIZER BENCHMARK
+COMPONENT 5B: STAGE 2 OPTIMIZER BENCHMARK
 {'='*80}""")
     
     # Configuration
-    STAGE2_CHECKPOINT = Path('models/emotion_stage2_progressive.pth')
+    STAGE1_CHECKPOINT = Path('models/emotion_stage1_warmup.pth')
     DATA_DIR = Path('data/raw')
-    OUTPUT_DIR = Path('results/optimization/optimizers')
+    OUTPUT_DIR = Path('results/optimization/stage2_optimizers')
     
-    if not STAGE2_CHECKPOINT.exists():
-        print(f"""\nError: Stage 2 checkpoint not found: {STAGE2_CHECKPOINT}
-Please train Stage 2 first or update checkpoint path""")
+    if not STAGE1_CHECKPOINT.exists():
+        print(f"""\nError: Stage 1 checkpoint not found: {STAGE1_CHECKPOINT}
+Please train Stage 1 first or update checkpoint path""")
         return
     
     # Device
@@ -503,24 +410,25 @@ Please train Stage 2 first or update checkpoint path""")
         num_workers=4
     )
     
-    # Load model from Stage 2
-    print("\nLoading Stage 2 model...")
+    # Load model from Stage 1
+    print("\nLoading Stage 1 model...")
     model = build_emotion_model(num_classes=7, pretrained=True, verbose=False)
-    checkpoint = torch.load(STAGE2_CHECKPOINT, map_location=device)
+    checkpoint = torch.load(STAGE1_CHECKPOINT, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     
-    # Unfreeze blocks 2-5 for Stage 3
-    model = unfreeze_vgg16_blocks(model, blocks_to_unfreeze=[2, 3, 4, 5], verbose=False)
+    # Unfreeze blocks 4-5 for Stage 2
+    model = unfreeze_vgg16_blocks(model, blocks_to_unfreeze=[4, 5], verbose=False)
     model = model.to(device)
     
-    print(f"✓ Model loaded from: {STAGE2_CHECKPOINT}")
+    print(f"✓ Model loaded from: {STAGE1_CHECKPOINT}")
+    print(f"✓ Unfrozen blocks 4-5 for Stage 2 configuration")
     
     # Get class weights
     class_weights = calculate_class_weights(DATA_DIR / 'train')
     criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
     
     # Run benchmark
-    df, best_config = run_optimizer_benchmark(
+    df, best_config = run_stage2_optimizer_benchmark(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -530,18 +438,15 @@ Please train Stage 2 first or update checkpoint path""")
         output_dir=OUTPUT_DIR
     )
     
-    # Save detailed report
-    save_benchmark_results(df, best_config, OUTPUT_DIR)
-    
     print(f"""\n{'='*80}
-OPTIMIZER BENCHMARK COMPLETE
+STAGE 2 OPTIMIZER BENCHMARK COMPLETE
 {'='*80}
 
 Outputs saved to: {OUTPUT_DIR}
 Next steps:
-1. Review optimizer_benchmark_comparison.png
-2. Check optimizer_benchmark_report.txt for recommendations
-3. Use configs/best_optimizer_config.json for training""")
+1. Review stage2_optimizer_benchmark_report.txt
+2. Stage 2 training will auto-use configs/best_stage2_optimizer_config.json
+3. Run: python scripts/train_stage2_progressive.py""")
     print("=" * 80)
 
 

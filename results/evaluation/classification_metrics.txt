@@ -1,32 +1,32 @@
 EMOTION RECOGNITION - CLASSIFICATION METRICS
 ================================================================================
 
-Overall Accuracy: 53.76%
+Overall Accuracy: 60.84%
 Total Test Samples: 7178
 
 Emotion      Precision    Recall       F1-Score     Support   
 --------------------------------------------------------------------------------
-Angry            0.4552       0.3132       0.3711        958
-Disgust          0.1883       0.5495       0.2805        111
-Fear             0.3602       0.2227       0.2752       1024
-Happy            0.7409       0.8191       0.7780       1774
-Neutral          0.4952       0.4996       0.4974       1233
-Sad              0.4190       0.4747       0.4451       1247
-Surprise         0.6451       0.7329       0.6862        831
+Angry            0.5574       0.4562       0.5017        958
+Disgust          0.2986       0.7748       0.4311        111
+Fear             0.4872       0.2422       0.3235       1024
+Happy            0.8490       0.8365       0.8427       1774
+Neutral          0.5009       0.6959       0.5825       1233
+Sad              0.5144       0.4723       0.4925       1247
+Surprise         0.6710       0.8002       0.7300        831
 --------------------------------------------------------------------------------
-Macro Average     0.4720       0.5159       0.4762
-Weighted Avg     0.5307       0.5376       0.5276
+Macro Average     0.5541       0.6112       0.5577
+Weighted Avg     0.6114       0.6084       0.5982
 
 ================================================================================
 TOP MISCLASSIFICATIONS
 ================================================================================
-1. Fear         predicted as Sad         :  249 (24.32%)
-2. Neutral      predicted as Sad         :  243 (19.71%)
-3. Sad          predicted as Neutral     :  230 (18.44%)
-4. Angry        predicted as Sad         :  214 (22.34%)
-5. Neutral      predicted as Happy       :  165 (13.38%)
-6. Fear         predicted as Surprise    :  162 (15.82%)
-7. Fear         predicted as Neutral     :  141 (13.77%)
-8. Angry        predicted as Neutral     :  130 (13.57%)
-9. Sad          predicted as Happy       :  127 (10.18%)
-10. Sad          predicted as Fear        :  125 (10.02%)
+1. Sad          predicted as Neutral     :  329 (26.38%)
+2. Fear         predicted as Sad         :  207 (20.21%)
+3. Fear         predicted as Neutral     :  181 (17.68%)
+4. Fear         predicted as Surprise    :  174 (16.99%)
+5. Angry        predicted as Neutral     :  173 (18.06%)
+6. Neutral      predicted as Sad         :  143 (11.60%)
+7. Fear         predicted as Angry       :  132 (12.89%)
+8. Happy        predicted as Neutral     :  121 ( 6.82%)
+9. Angry        predicted as Sad         :  120 (12.53%)
+10. Sad          predicted as Fear        :  112 ( 8.98%)

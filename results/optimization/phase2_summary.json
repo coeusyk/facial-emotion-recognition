@@ -1,32 +1,17 @@
 {
-  "timestamp": "2025-11-26T17:57:13.945129",
+  "timestamp": "2025-11-27T16:46:55.490422",
   "components_run": [
-    1,
     2,
-    3,
-    4,
-    5
+    6
   ],
   "results": {
-    "component_1": {
-      "status": "completed",
-      "output_dir": "results\\optimization\\class_weights"
-    },
     "component_2": {
       "status": "completed",
       "output_dir": "results\\optimization\\thresholds"
     },
-    "component_3": {
-      "status": "completed",
-      "note": "Integrated in training via dataloader"
-    },
-    "component_4": {
-      "status": "integrated",
-      "recommended_value": 0.1
-    },
-    "component_5": {
-      "status": "completed",
-      "best_config": "Adam_2e-5"
+    "component_6": {
+      "status": "configs_generated",
+      "total_configs": 36
     }
   },
   "expected_improvements": {

@@ -57,7 +57,9 @@ def main():
     parser.add_argument('--weight-decay', type=float, default=Config.STAGE1_WEIGHT_DECAY,
                         help=f'Weight decay (default: {Config.STAGE1_WEIGHT_DECAY})')
     parser.add_argument('--label-smoothing', type=float, default=0.0,
-                        help='Label smoothing factor (0.0-0.2, default: 0.0)')
+                        help='Label smoothing factor (0.0-0.2, default: 0.0) from Phase 2 optimization')
+    parser.add_argument('--use-optimized-weights', action='store_true',
+                        help='Use Phase 2 optimized class weights as base instead of Effective Number weights')
     args = parser.parse_args()
     
     print("=" * 80)
@@ -87,10 +89,47 @@ def main():
         num_workers=4
     )
     
-    # Calculate base class weights (Effective Number method)
-    # These will be used as reference for adaptive weighting in later stages
-    base_weights = calculate_class_weights(args.data_dir / 'train')
-    current_weights = base_weights.clone()  # Stage 1 uses base weights directly
+    # Calculate base class weights
+    # Option 1: Effective Number method (default)
+    # Option 2: Phase 2 optimized weights (if --use-optimized-weights flag set)
+    base_weights_en = calculate_class_weights(args.data_dir / 'train')
+    
+    # Check if Phase 2 optimized weights should be used as base
+    optimized_weights_path = Path('configs/class_weights_moderate.pth')
+    
+    if args.use_optimized_weights:
+        print(f"\n{'='*80}")
+        print("LOADING PHASE 2 OPTIMIZED WEIGHTS AS BASE")
+        print("="*80)
+        
+        if not optimized_weights_path.exists():
+            print(f"\n✗ ERROR: Phase 2 optimized weights not found: {optimized_weights_path}")
+            print(f"  Run Phase 2 optimization first: python scripts/run_phase2_optimization.py --components 1")
+            print(f"  Falling back to Effective Number weights")
+            base_weights = base_weights_en
+        else:
+            optimized_checkpoint = torch.load(optimized_weights_path, map_location=device)
+            base_weights = optimized_checkpoint['weights'].clone()
+            
+            print(f"\n✓ Loaded Phase 2 optimized class weights: {optimized_weights_path}")
+            print(f"  Strategy: {optimized_checkpoint.get('strategy', 'moderate')}")
+            print(f"  These weights will cascade through Stage 2 and Stage 3")
+            
+            # Print comparison
+            emotion_classes = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+            print(f"\nWeight Comparison (EN Baseline vs Phase 2 Optimized):")
+            print(f"{'Emotion':<12} {'EN Weight':<12} {'Phase 2 Weight':<15} {'Change':<10}")
+            print(f"{'-'*55}")
+            for idx, class_name in enumerate(emotion_classes):
+                en = base_weights_en[idx].item()
+                opt = base_weights[idx].item()
+                change = ((opt - en) / en) * 100 if en > 0 else 0
+                change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
+                print(f"{class_name:<12} {en:>8.4f}    {opt:>8.4f}         {change_str:>8}")
+            print("="*80)
+    else:
+        base_weights = base_weights_en
+        print(f"\n✓ Using Effective Number base weights")
     
     print(f"\n✓ Data loaded successfully")
     print(f"  Training batches: {len(train_loader)}")
@@ -121,7 +160,7 @@ def main():
     print("="*80)
     
     criterion = nn.CrossEntropyLoss(
-        weight=current_weights.to(device),
+        weight=base_weights.to(device),
         label_smoothing=args.label_smoothing
     )
     
@@ -210,12 +249,12 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'optimizer_type': 'adam',  # Track optimizer for stage continuity
                 'train_loss': train_loss,
                 'val_loss': val_loss,
                 'val_acc': val_acc,
-                'per_class_accuracy': per_class_acc,  # For adaptive weighting
+                'per_class_accuracy': per_class_acc,  # For adaptive weighting in Stage 2
                 'base_weights': base_weights.cpu(),   # Original Effective Number weights
-                'current_weights': current_weights.cpu(),  # Weights used (same as base in Stage 1)
                 'stage': 'warmup'
             }
             

@@ -67,8 +67,32 @@ def main():
     parser.add_argument('--overfitting-threshold', type=float, default=Config.STAGE3_MAX_OVERFITTING_GAP,
                         help=f'Stop if train/val loss gap exceeds this (default: {Config.STAGE3_MAX_OVERFITTING_GAP})')
     parser.add_argument('--label-smoothing', type=float, default=0.0,
-                        help='Label smoothing factor (0.0-0.2, default: 0.0)')
+                        help='Label smoothing factor (0.0-0.2, default: 0.0) from Phase 2 optimization')
+    parser.add_argument('--use-optimized-weights', action='store_true',
+                        help='Use Phase 2 optimized class weights instead of adaptive weights (configs/class_weights_moderate.pth)')
     args = parser.parse_args()
+    
+    # Auto-detect Phase 2 optimized learning rate and weight decay settings
+    # NOTE: Optimizer TYPE is now determined by Stage 2 checkpoint for continuity
+    phase2_optimizer_config = Path('configs/best_optimizer_config.json')
+    
+    if phase2_optimizer_config.exists():
+        import json
+        with open(phase2_optimizer_config, 'r') as f:
+            opt_config = json.load(f)
+        
+        # Apply Phase 2 LR/weight decay settings if user didn't override
+        if args.lr == Config.STAGE3_LR:  # User didn't override
+            args.lr = opt_config['learning_rate']
+            print(f"\n✓ Auto-detected Phase 2 optimized learning rate: {args.lr:.0e}")
+        
+        if args.weight_decay == Config.STAGE3_WEIGHT_DECAY:  # User didn't override
+            args.weight_decay = opt_config['weight_decay']
+            print(f"✓ Auto-detected Phase 2 optimized weight decay: {args.weight_decay:.0e}")
+        
+        # Note: Optimizer TYPE is ignored here - we use Stage 2's type for continuity
+        phase2_recommended_optimizer = opt_config.get('optimizer', 'adam')
+        print(f"  (Phase 2 recommended {phase2_recommended_optimizer.upper()}, but using Stage 2 type for smooth transition)")
     
     print("=" * 80)
     print("STAGE 3: DEEP FINE-TUNING - FULL BACKBONE REFINEMENT")
@@ -119,6 +143,15 @@ def main():
     print(f"  Stage: {checkpoint.get('stage', 'unknown')}")
     print(f"  Epoch: {checkpoint.get('epoch', 'unknown')}")
     print(f"  Val Acc: {checkpoint.get('val_acc', 0.0):.2f}%")
+    print(f"  Train Loss: {checkpoint.get('train_loss', 0.0):.4f}")
+    print(f"  Val Loss: {checkpoint.get('val_loss', 0.0):.4f}")
+    
+    # Get optimizer type from Stage 2 for continuity (CRITICAL for smooth transition)
+    stage2_optimizer_type = checkpoint.get('optimizer_type', 'adam')
+    stage2_train_loss = checkpoint.get('train_loss', 0.0)
+    stage2_val_loss = checkpoint.get('val_loss', 0.0)
+    
+    print(f"  Optimizer: {stage2_optimizer_type.upper()} (will use same type)")
     
     stage2_val_acc = checkpoint.get('val_acc', 0.0)
     
@@ -136,20 +169,54 @@ def main():
         print(f"  Please re-train Stage 2 with updated script")
         sys.exit(1)
     
-    # Calculate adaptive weights based on Stage 2 performance
+    # Calculate weights: Either Phase 2 optimized OR adaptive based on Stage 2 performance
     emotion_classes = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
-    current_weights, weight_metadata = calculate_adaptive_weights(
-        per_class_accuracy=stage2_per_class_acc,
-        base_weights=base_weights,
-        class_names=emotion_classes,
-        stage=2  # Stage 2→3 transition
-    )
+    optimized_weights_path = Path('configs/class_weights_moderate.pth')
     
-    # Save weight history
-    save_weight_history(weight_metadata, stage=2)
-    
-    # Print comparison
-    print_weight_comparison(base_weights, current_weights, emotion_classes)
+    if args.use_optimized_weights:
+        # Phase 2 Optimization: Use diagnostic-adjusted weights from Component 1
+        print(f"\n{'='*80}")
+        print("LOADING PHASE 2 OPTIMIZED CLASS WEIGHTS")
+        print("="*80)
+        
+        if not optimized_weights_path.exists():
+            print(f"\n✗ ERROR: Phase 2 optimized weights not found: {optimized_weights_path}")
+            print(f"  Run Phase 2 optimization first: python scripts/run_phase2_optimization.py --components 1")
+            sys.exit(1)
+        
+        optimized_checkpoint = torch.load(optimized_weights_path, map_location=device)
+        current_weights = optimized_checkpoint['weights'].clone()
+        
+        print(f"\n✓ Loaded optimized class weights from: {optimized_weights_path}")
+        print(f"  Strategy: {optimized_checkpoint.get('strategy', 'moderate')}")
+        print(f"  Description: Diagnostic-adjusted weights from Phase 2 Component 1")
+        print(f"  Bypassing adaptive weight calculation")
+        
+        # Print weight comparison
+        print(f"\nWeight Comparison (Base EN vs Phase 2 Optimized):")
+        print(f"{'Emotion':<12} {'Base Weight':<15} {'Optimized Weight':<18} {'Change':<10}")
+        print(f"{'-'*60}")
+        for idx, class_name in enumerate(emotion_classes):
+            base = base_weights[idx].item()
+            opt = current_weights[idx].item()
+            change = ((opt - base) / base) * 100 if base > 0 else 0
+            change_str = f"+{change:.1f}%" if change >= 0 else f"{change:.1f}%"
+            print(f"{class_name:<12} {base:>8.4f}       {opt:>8.4f}         {change_str:>8}")
+        print("="*80)
+    else:
+        # Standard adaptive weighting based on Stage 2 performance
+        current_weights, weight_metadata = calculate_adaptive_weights(
+            per_class_accuracy=stage2_per_class_acc,
+            base_weights=base_weights,
+            class_names=emotion_classes,
+            stage=2  # Stage 2→3 transition
+        )
+        
+        # Save weight history
+        save_weight_history(weight_metadata, stage=2)
+        
+        # Print comparison
+        print_weight_comparison(base_weights, current_weights, emotion_classes)
     
     # Check if Stage 3 is needed
     if stage2_val_acc >= 64.0:
@@ -192,12 +259,63 @@ def main():
         label_smoothing=args.label_smoothing
     )
     
-    # Optimizer (all unfrozen parameters)
-    optimizer = optim.Adam(
-        model.parameters(),  # All trainable params (blocks 2-5 + classifier)
-        lr=args.lr,
-        weight_decay=args.weight_decay
-    )
+    # Optimizer - MUST use same type as Stage 2 for smooth transition
+    # This is critical to avoid loss spikes when transitioning between stages
+    if stage2_optimizer_type == 'adamw':
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    else:
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    
+    # Load optimizer state from Stage 2 for smooth transition
+    # This preserves momentum and adaptive learning rate history
+    stage2_optimizer_state = checkpoint.get('optimizer_state_dict', None)
+    optimizer_state_loaded = False
+    
+    if stage2_optimizer_state is not None:
+        try:
+            # Get current parameter names/ids
+            current_param_ids = set(id(p) for p in model.parameters() if p.requires_grad)
+            
+            # Load state - this may fail for newly unfrozen parameters
+            # which is expected and handled gracefully
+            optimizer.load_state_dict(stage2_optimizer_state)
+            optimizer_state_loaded = True
+            
+            # Update learning rate to Stage 3 target (state loading preserves Stage 2 LR)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = args.lr
+                param_group['weight_decay'] = args.weight_decay
+            
+            print(f"\n✓ Optimizer state loaded from Stage 2 (smooth transition)")
+            print(f"  Momentum and adaptive LR history preserved")
+            print(f"  Learning rate updated to: {args.lr:.0e}")
+            
+        except Exception as e:
+            print(f"\n⚠ Could not load optimizer state: {e}")
+            print(f"  Starting with fresh optimizer (may cause initial loss spike)")
+            optimizer_state_loaded = False
+    else:
+        print(f"\n⚠ No optimizer state in Stage 2 checkpoint")
+        print(f"  Starting with fresh optimizer (may cause initial loss spike)")
+    
+    # Report expected transition behavior
+    print(f"\n{'='*80}")
+    print("STAGE TRANSITION METRICS")
+    print("="*80)
+    print(f"  Stage 2 Final: Train Loss={stage2_train_loss:.4f}, Val Loss={stage2_val_loss:.4f}")
+    if optimizer_state_loaded:
+        print(f"  Expected Stage 3 Epoch 1: Loss increase < 0.15 (smooth transition)")
+    else:
+        print(f"  ⚠ Expected Stage 3 Epoch 1: Loss increase 0.20-0.40 (no state continuity)")
+    print("="*80)
     
     # LR Scheduler: ReduceLROnPlateau (more aggressive)
     scheduler = ReduceLROnPlateau(
@@ -214,7 +332,7 @@ def main():
         verbose=True
     )
     
-    print(f"\n✓ Optimizer: Adam")
+    print(f"\n✓ Optimizer: {stage2_optimizer_type.upper()} (same as Stage 2 for continuity)")
     print(f"  Learning rate: {args.lr} (very low to prevent catastrophic forgetting)")
     print(f"  Weight decay: {args.weight_decay}")
     print(f"  Parameters: Blocks 2-5 + Classifier ({sum(p.numel() for p in model.parameters() if p.requires_grad):,})")
@@ -302,6 +420,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'optimizer_type': stage2_optimizer_type,  # Track optimizer for continuity
                 'train_loss': train_loss,
                 'val_loss': val_loss,
                 'val_acc': val_acc,

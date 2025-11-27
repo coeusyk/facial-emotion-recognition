@@ -1,0 +1,61 @@
+================================================================================
+STAGE 2 OPTIMIZER & LEARNING RATE BENCHMARK REPORT
+================================================================================
+
+Objective:
+  Compare Adam vs AdamW with different learning rates for Stage 2 training.
+  Current baseline: Adam with LR=1e-5
+
+Hypothesis:
+  - Stage 2 has different dynamics than Stage 3 (~40% vs ~90% trainable)
+  - Current LR (1e-5) might not be optimal
+  - AdamW might handle weight decay better
+
+================================================================================
+RESULTS SUMMARY
+================================================================================
+
+Rank   | Config       |  Best Val Acc | Best Epoch |  Converged
+--------------------------------------------------------------------------------
+1      | Adam_5e-5    |       50.98% |         10 |       True ***
+2      | AdamW_5e-5   |       50.78% |         10 |       True 
+3      | AdamW_2e-5   |       49.08% |          9 |       True 
+4      | Adam_2e-5    |       48.66% |         10 |       True 
+5      | AdamW_1e-5   |       44.81% |         10 |       True 
+6      | Adam_1e-5    |       44.25% |          9 |       True 
+7      | Adam_5e-6    |       41.31% |          9 |       True 
+8      | AdamW_5e-6   |       41.10% |         10 |       True 
+
+================================================================================
+BEST CONFIGURATION FOR STAGE 2
+================================================================================
+
+Config: Adam_5e-5
+  Optimizer: ADAM
+  Learning Rate: 5e-05
+  Weight Decay: 1e-04
+
+Performance:
+  Best Validation Accuracy: 50.98%
+  Best Epoch: 10
+  Converged: Yes
+
+Improvement over baseline (Adam_1e-5):
+  Best Val Acc: 44.25% -> 50.98% (+6.72%)
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+1. Stage 2 training will automatically use these settings:
+   python scripts/train_stage2_progressive.py
+   (Auto-loads lr=5e-05, wd=1e-04)
+
+2. To override auto-detection:
+   python scripts/train_stage2_progressive.py --lr <custom_lr> --weight-decay <custom_wd>
+
+4. Expected improvements:
+   - Better Stage 2 convergence
+   - Improved Stage 2 checkpoint for Stage 3
+   - Cascading benefits through training pipeline
+
