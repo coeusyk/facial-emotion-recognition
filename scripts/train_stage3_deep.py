@@ -80,8 +80,8 @@ def main():
                         help='Enable preprocessing (Unsharp Mask + CLAHE) for +4-5%% expected gain')
     parser.add_argument('--no-preprocess', action='store_true',
                         help='Explicitly disable preprocessing (overrides config)')
-    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], default='sgd',
-                        help='Optimizer: adam (baseline, stable) or sgd (SOTA, +2-3%% gain)')
+    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], default='adam',
+                        help='Optimizer: adam (stable, recommended) or sgd (experimental, +2-3%% gain)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='Momentum for SGD (default: 0.9, higher=more history)')
     args = parser.parse_args()
@@ -173,7 +173,8 @@ def main():
     
     print(f"\n✓ Data loaded successfully")
     print(f"  Training batches: {len(train_loader)}")
-    print(f"  Validation batches: {len(val_loader)}")
+    if val_loader is not None:
+        print(f"  Validation batches: {len(val_loader)}")
     
     # Build model and load Stage 2 checkpoint
     print(f"\n{'='*80}")
@@ -336,30 +337,37 @@ def main():
     optimizer_state_loaded = False
     
     if stage2_optimizer_state is not None:
-        try:
-            # Get current parameter names/ids
-            current_param_ids = set(id(p) for p in model.parameters() if p.requires_grad)
-            
-            # Load state - this may fail for newly unfrozen parameters
-            # which is expected and handled gracefully
-            optimizer.load_state_dict(stage2_optimizer_state)
-            optimizer_state_loaded = True
-            
-            # Update learning rate to Stage 3 target (state loading preserves Stage 2 LR)
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr
-                if optimizer_type == 'sgd':
-                    param_group['weight_decay'] = 1e-5  # Stage 3 SGD weight decay
-                else:
-                    param_group['weight_decay'] = args.weight_decay
-            
-            print(f"\n✓ Optimizer state loaded from Stage 2 (smooth transition)")
-            print(f"  Type: {optimizer_type.upper()}, Momentum and adaptive LR history preserved")
-            print(f"  Learning rate updated to: {args.lr:.0e}")
-            
-        except Exception as e:
-            print(f"\n⚠ Could not load optimizer state: {e}")
-            print(f"  Starting with fresh optimizer (may cause initial loss spike)")
+        # Check if optimizer types match to prevent parameter corruption
+        if stage2_optimizer_type == optimizer_type:
+            try:
+                # Get current parameter names/ids
+                current_param_ids = set(id(p) for p in model.parameters() if p.requires_grad)
+                
+                # Load state - this may fail for newly unfrozen parameters
+                # which is expected and handled gracefully
+                optimizer.load_state_dict(stage2_optimizer_state)
+                optimizer_state_loaded = True
+                
+                # Update learning rate to Stage 3 target (state loading preserves Stage 2 LR)
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = args.lr
+                    if optimizer_type == 'sgd':
+                        param_group['weight_decay'] = 1e-5  # Stage 3 SGD weight decay
+                    else:
+                        param_group['weight_decay'] = args.weight_decay
+                
+                print(f"\n✓ Optimizer state loaded from Stage 2 (smooth transition)")
+                print(f"  Type: {optimizer_type.upper()}, Momentum and adaptive LR history preserved")
+                print(f"  Learning rate updated to: {args.lr:.0e}")
+                
+            except Exception as e:
+                print(f"\n⚠ Could not load optimizer state: {e}")
+                print(f"  Starting with fresh optimizer (may cause initial loss spike)")
+                optimizer_state_loaded = False
+        else:
+            print(f"\n⚠ Optimizer type mismatch:")
+            print(f"  Stage 2: {stage2_optimizer_type.upper()}, Stage 3: {optimizer_type.upper()}")
+            print(f"  Starting with fresh {optimizer_type.upper()} optimizer (recommended)")
             optimizer_state_loaded = False
     else:
         print(f"\n⚠ No optimizer state in Stage 2 checkpoint")
@@ -393,10 +401,16 @@ def main():
         verbose=True
     )
     
-    print(f"\n✓ Optimizer: {stage2_optimizer_type.upper()} (same as Stage 2 for continuity)")
+    print(f"\n✓ Optimizer: {optimizer_type.upper()} (matching Stage 2 for continuity)")
     print(f"  Learning rate: {args.lr} (very low to prevent catastrophic forgetting)")
     print(f"  Weight decay: {args.weight_decay}")
+    if optimizer_type == 'sgd':
+        print(f"  Momentum: {args.momentum}")
     print(f"  Parameters: Blocks 2-5 + Classifier ({sum(p.numel() for p in model.parameters() if p.requires_grad):,})")
+    if optimizer_state_loaded:
+        print(f"  State: Loaded from Stage 2 (warm start)")
+    else:
+        print(f"  State: Fresh initialization")
     
     print(f"\n✓ LR Scheduler: ReduceLROnPlateau (aggressive)")
     print(f"  Mode: {Config.STAGE3_SCHEDULER_MODE} (reduce on val_loss)")

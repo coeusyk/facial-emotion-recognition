@@ -69,8 +69,8 @@ def main():
                         help='Enable preprocessing (Unsharp Mask + CLAHE) for +4-5%% expected gain')
     parser.add_argument('--no-preprocess', action='store_true',
                         help='Explicitly disable preprocessing (overrides config)')
-    parser.add_argument('--optimizer', type=str, default='sgd', choices=['adam', 'sgd'],
-                        help='Optimizer: adam (baseline) or sgd+nesterov (recommended, +2-3%% gain)')
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'],
+                        help='Optimizer: adam (stable, recommended) or sgd (experimental, +2-3%% gain)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='SGD momentum (default: 0.9, ignored for Adam)')
     args = parser.parse_args()
@@ -181,7 +181,8 @@ def main():
     
     print(f"\n✓ Data loaded successfully")
     print(f"  Training batches: {len(train_loader)}")
-    print(f"  Validation batches: {len(val_loader)}")
+    if val_loader is not None:
+        print(f"  Validation batches: {len(val_loader)}")
     
     # Build model (features frozen by default)
     print(f"\n{'='*80}")
@@ -220,7 +221,7 @@ def main():
             model.classifier,
             optimizer_type='sgd',
             stage=1,
-            lr=args.lr if args.lr != Config.STAGE1_LR else None,  # Use custom LR if provided
+            lr=args.lr,
             momentum=args.momentum,
             nesterov=True
         )
@@ -236,7 +237,7 @@ def main():
             model.classifier,
             optimizer_type='adam',
             stage=1,
-            lr=args.lr if args.lr != Config.STAGE1_LR else None
+            lr=args.lr
         )
         scheduler = None
         scheduler_type = "None (Adam typically doesn't need warmup)"

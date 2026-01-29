@@ -76,8 +76,8 @@ def main():
                         help='Enable preprocessing (Unsharp Mask + CLAHE) for +4-5%% expected gain')
     parser.add_argument('--no-preprocess', action='store_true',
                         help='Explicitly disable preprocessing (overrides config)')
-    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], default='sgd',
-                        help='Optimizer: adam (baseline, stable) or sgd (SOTA, +2-3%% gain)')
+    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], default='adam',
+                        help='Optimizer: adam (stable, recommended) or sgd (experimental, +2-3%% gain)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='Momentum for SGD (default: 0.9, higher=more history)')
     args = parser.parse_args()
@@ -185,7 +185,8 @@ def main():
     
     print(f"\n✓ Data loaded successfully")
     print(f"  Training batches: {len(train_loader)}")
-    print(f"  Validation batches: {len(val_loader)}")
+    if val_loader is not None:
+        print(f"  Validation batches: {len(val_loader)}")
     
     # Build model and load Stage 1 checkpoint
     print(f"\n{'='*80}")
@@ -284,31 +285,39 @@ def main():
     else:
         optimizer = create_optimizer(model, 'adam', stage=2, lr=args.lr)
     
-    # Load optimizer state from Stage 1 for smooth transition
+    # Load optimizer state from Stage 1 for smooth transition (only if types match)
     stage1_optimizer_state = checkpoint.get('optimizer_state_dict', None)
+    stage1_optimizer_type = checkpoint.get('optimizer_type', 'unknown')
     optimizer_state_loaded = False
     
     if stage1_optimizer_state is not None:
-        try:
-            optimizer.load_state_dict(stage1_optimizer_state)
-            optimizer_state_loaded = True
-            
-            # Update learning rate to Stage 2 target
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = args.lr
-                if args.optimizer.lower() == 'sgd':
-                    param_group['weight_decay'] = 5e-5  # Stage 2 SGD weight decay
-                else:
-                    param_group['weight_decay'] = args.weight_decay
-            
-            print(f"\n✓ Optimizer state loaded from Stage 1 (smooth transition)")
-            print(f"  Type: {args.optimizer.upper()}, LR updated to: {args.lr:.0e}")
-            
-        except Exception as e:
-            print(f"\n⚠ Could not load optimizer state: {e}")
-            print(f"  Starting with fresh optimizer")
+        # Check if optimizer types match
+        if stage1_optimizer_type == args.optimizer.lower():
+            try:
+                optimizer.load_state_dict(stage1_optimizer_state)
+                optimizer_state_loaded = True
+                
+                # Update learning rate to Stage 2 target
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = args.lr
+                    if args.optimizer.lower() == 'sgd':
+                        param_group['weight_decay'] = 5e-5  # Stage 2 SGD weight decay
+                    else:
+                        param_group['weight_decay'] = args.weight_decay
+                
+                print(f"\n✓ Optimizer state loaded from Stage 1 (smooth transition)")
+                print(f"  Type: {args.optimizer.upper()}, LR updated to: {args.lr:.0e}")
+                
+            except Exception as e:
+                print(f"\n⚠ Could not load optimizer state: {e}")
+                print(f"  Starting with fresh optimizer")
+        else:
+            print(f"\n⚠ Optimizer type mismatch:")
+            print(f"  Stage 1: {stage1_optimizer_type.upper()}, Stage 2: {args.optimizer.upper()}")
+            print(f"  Starting with fresh {args.optimizer.upper()} optimizer (recommended)")
     else:
         print(f"\n⚠ No optimizer state in Stage 1 checkpoint")
+        print(f"  Starting with fresh {args.optimizer.upper()} optimizer")
     
     print_optimizer_info(optimizer, stage=2)
     
@@ -327,10 +336,16 @@ def main():
         verbose=True
     )
     
-    print(f"\n✓ Optimizer: Adam")
+    print(f"\n✓ Optimizer: {args.optimizer.upper()}")
     print(f"  Learning rate: {args.lr}")
     print(f"  Weight decay: {args.weight_decay}")
+    if args.optimizer.lower() == 'sgd':
+        print(f"  Momentum: {args.momentum}")
     print(f"  Parameters: Blocks 4-5 + Classifier ({sum(p.numel() for p in model.parameters() if p.requires_grad):,})")
+    if optimizer_state_loaded:
+        print(f"  State: Loaded from Stage 1 (warm start)")
+    else:
+        print(f"  State: Fresh initialization")
     
     print(f"\n✓ LR Scheduler: ReduceLROnPlateau")
     print(f"  Mode: {Config.STAGE2_SCHEDULER_MODE} (reduce on val_loss)")
