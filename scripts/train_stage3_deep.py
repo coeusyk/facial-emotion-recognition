@@ -32,7 +32,6 @@ from pathlib import Path
 import argparse
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Add project root to path for imports
@@ -45,6 +44,7 @@ from src.models.vgg16_emotion import build_emotion_model, unfreeze_vgg16_blocks
 from src.training.trainer import train_one_epoch, validate
 from src.training.utils import MetricTracker, EarlyStopping
 from src.training.adaptive_weights import calculate_adaptive_weights, save_weight_history, print_weight_comparison
+from src.training.optimizer import create_optimizer, print_optimizer_info, apply_gradient_clipping
 
 
 def main():
@@ -74,6 +74,14 @@ def main():
                         help='Custom output directory for model checkpoint and logs (for grid search)')
     parser.add_argument('--dropout', type=float, default=None,
                         help='Dropout rate for classifier (auto-loaded from Stage 2 if not specified)')
+    parser.add_argument('--preprocess', action='store_true',
+                        help='Enable preprocessing (Unsharp Mask + CLAHE) for +4-5%% expected gain')
+    parser.add_argument('--no-preprocess', action='store_true',
+                        help='Explicitly disable preprocessing (overrides config)')
+    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], default='sgd',
+                        help='Optimizer: adam (baseline, stable) or sgd (SOTA, +2-3%% gain)')
+    parser.add_argument('--momentum', type=float, default=0.9,
+                        help='Momentum for SGD (default: 0.9, higher=more history)')
     args = parser.parse_args()
     
     # Determine output paths (custom or default)
@@ -128,10 +136,32 @@ def main():
     print("LOADING DATA")
     print("="*80)
     
+    # Determine preprocessing settings
+    apply_preprocessing = False
+    if args.preprocess:
+        apply_preprocessing = True
+        print("\n✓ Preprocessing ENABLED via --preprocess flag")
+    elif args.no_preprocess:
+        apply_preprocessing = False
+        print("\n✓ Preprocessing DISABLED via --no-preprocess flag")
+    elif Config.PREPROCESSING_ENABLED:
+        apply_preprocessing = True
+        print("\n✓ Preprocessing ENABLED via config")
+    else:
+        print("\n✓ Preprocessing DISABLED (default)")
+    
+    if apply_preprocessing:
+        preprocess_config = Config.get_preprocessing_config()
+        print(f"  Expected gain: +4-5% accuracy")
+    else:
+        preprocess_config = None
+    
     train_loader, val_loader, test_loader, class_names = create_dataloaders(
         args.data_dir,
         batch_size=args.batch_size,
-        num_workers=4
+        num_workers=4,
+        apply_preprocessing=apply_preprocessing,
+        preprocess_config=preprocess_config
     )
     
     print(f"\n✓ Data loaded successfully")
@@ -281,20 +311,17 @@ def main():
         label_smoothing=args.label_smoothing
     )
     
-    # Optimizer - MUST use same type as Stage 2 for smooth transition
-    # This is critical to avoid loss spikes when transitioning between stages
-    if stage2_optimizer_type == 'adamw':
-        optimizer = optim.AdamW(
-            model.parameters(),
-            lr=args.lr,
-            weight_decay=args.weight_decay
-        )
+    # Optimizer - Determine type from args or Stage 2 checkpoint for smooth transition
+    # Use args.optimizer if provided, otherwise load from Stage 2 checkpoint
+    optimizer_type = args.optimizer.lower()
+    if stage2_optimizer_type and stage2_optimizer_type != optimizer_type:
+        print(f"\n⚠ Stage 2 optimizer ({stage2_optimizer_type.upper()}) differs from args ({optimizer_type.upper()})")
+        print(f"  Using args value for compatibility: {optimizer_type.upper()}")
+    
+    if optimizer_type == 'sgd':
+        optimizer = create_optimizer(model, 'sgd', stage=3, lr=args.lr, momentum=args.momentum)
     else:
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=args.lr,
-            weight_decay=args.weight_decay
-        )
+        optimizer = create_optimizer(model, 'adam', stage=3, lr=args.lr)
     
     # Load optimizer state from Stage 2 for smooth transition
     # This preserves momentum and adaptive learning rate history
@@ -314,10 +341,13 @@ def main():
             # Update learning rate to Stage 3 target (state loading preserves Stage 2 LR)
             for param_group in optimizer.param_groups:
                 param_group['lr'] = args.lr
-                param_group['weight_decay'] = args.weight_decay
+                if optimizer_type == 'sgd':
+                    param_group['weight_decay'] = 1e-5  # Stage 3 SGD weight decay
+                else:
+                    param_group['weight_decay'] = args.weight_decay
             
             print(f"\n✓ Optimizer state loaded from Stage 2 (smooth transition)")
-            print(f"  Momentum and adaptive LR history preserved")
+            print(f"  Type: {optimizer_type.upper()}, Momentum and adaptive LR history preserved")
             print(f"  Learning rate updated to: {args.lr:.0e}")
             
         except Exception as e:
@@ -327,6 +357,8 @@ def main():
     else:
         print(f"\n⚠ No optimizer state in Stage 2 checkpoint")
         print(f"  Starting with fresh optimizer (may cause initial loss spike)")
+    
+    print_optimizer_info(optimizer, stage=3)
     
     # Report expected transition behavior
     print(f"\n{'='*80}")
@@ -442,7 +474,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'optimizer_type': stage2_optimizer_type,  # Track optimizer for continuity
+                'optimizer_type': args.optimizer.lower(),  # Track optimizer for continuity
                 'train_loss': train_loss,
                 'val_loss': val_loss,
                 'val_acc': val_acc,

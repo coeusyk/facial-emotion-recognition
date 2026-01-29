@@ -34,9 +34,6 @@ setuptools==70.2.0
 six==1.17.0
 sympy==1.14.0
 threadpoolctl==3.6.0
-torch==2.9.1+cu130
-torchsummary==1.5.1
-torchvision==0.24.1+cu130
 tqdm==4.67.1
 typing-extensions==4.15.0
 tzdata==2025.2

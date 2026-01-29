@@ -6,6 +6,7 @@ __pycache__/
 # Documentation (keep images, ignore generated docs)
 /docs/*.md
 !/docs/images/
+!/docs/SETUP_GUIDE.md
 
 /data/
 /models/

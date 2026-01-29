@@ -140,7 +140,6 @@ python scripts/deploy/export_onnx.py
 For detailed information, see:
 - **[docs/README.md](docs/README.md)** - Complete project documentation
 - **[docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)** - Step-by-step setup guide
-- **[docs/PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md)** - Implementation details
 
 ## 📝 Usage Notes
 

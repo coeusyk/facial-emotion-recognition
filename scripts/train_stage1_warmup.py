@@ -30,8 +30,6 @@ from pathlib import Path
 import argparse
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim.lr_scheduler import LinearLR
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent
@@ -42,6 +40,7 @@ from src.data.data_pipeline import create_dataloaders, calculate_class_weights
 from src.models.vgg16_emotion import build_emotion_model
 from src.training.trainer import train_one_epoch, validate
 from src.training.utils import MetricTracker
+from src.training.optimizer import create_optimizer, get_warmup_scheduler, print_optimizer_info, apply_gradient_clipping
 
 
 def main():
@@ -64,6 +63,14 @@ def main():
                         help='Custom output directory for model checkpoint and logs (for grid search)')
     parser.add_argument('--dropout', type=float, default=Config.CLASSIFIER_DROPOUT,
                         help=f'Dropout rate for classifier (default: {Config.CLASSIFIER_DROPOUT})')
+    parser.add_argument('--preprocess', action='store_true',
+                        help='Enable preprocessing (Unsharp Mask + CLAHE) for +4-5%% expected gain')
+    parser.add_argument('--no-preprocess', action='store_true',
+                        help='Explicitly disable preprocessing (overrides config)')
+    parser.add_argument('--optimizer', type=str, default='sgd', choices=['adam', 'sgd'],
+                        help='Optimizer: adam (baseline) or sgd+nesterov (recommended, +2-3%% gain)')
+    parser.add_argument('--momentum', type=float, default=0.9,
+                        help='SGD momentum (default: 0.9, ignored for Adam)')
     args = parser.parse_args()
     
     # Determine output paths (custom or default)
@@ -96,10 +103,32 @@ def main():
     print("LOADING DATA")
     print("="*80)
     
+    # Determine preprocessing settings
+    apply_preprocessing = False
+    if args.preprocess:
+        apply_preprocessing = True
+        print("\n✓ Preprocessing ENABLED via --preprocess flag")
+    elif args.no_preprocess:
+        apply_preprocessing = False
+        print("\n✓ Preprocessing DISABLED via --no-preprocess flag")
+    elif Config.PREPROCESSING_ENABLED:
+        apply_preprocessing = True
+        print("\n✓ Preprocessing ENABLED via config")
+    else:
+        print("\n✓ Preprocessing DISABLED (default)")
+    
+    if apply_preprocessing:
+        preprocess_config = Config.get_preprocessing_config()
+        print(f"  Expected gain: +4-5% accuracy (+3-4% in Stage 1)")
+    else:
+        preprocess_config = None
+    
     train_loader, val_loader, test_loader, class_names = create_dataloaders(
         args.data_dir,
         batch_size=args.batch_size,
-        num_workers=4
+        num_workers=4,
+        apply_preprocessing=apply_preprocessing,
+        preprocess_config=preprocess_config
     )
     
     # Calculate base class weights
@@ -177,29 +206,37 @@ def main():
         label_smoothing=args.label_smoothing
     )
     
-    # Optimizer (only classifier parameters)
-    optimizer = optim.Adam(
-        model.classifier.parameters(),  # Only train classifier
-        lr=args.lr,
-        weight_decay=args.weight_decay
-    )
+    # Optimizer setup (SGD+Nesterov recommended, Adam for baseline)
+    if args.optimizer.lower() == 'sgd':
+        # SGD with Nesterov momentum (recommended for vision tasks)
+        # Stage 1: Higher LR (0.01) because training from scratch
+        optimizer = create_optimizer(
+            model.classifier,
+            optimizer_type='sgd',
+            stage=1,
+            lr=args.lr if args.lr != Config.STAGE1_LR else None,  # Use custom LR if provided
+            momentum=args.momentum,
+            nesterov=True
+        )
+        
+        # Create warmup scheduler (linear warmup from 0.001 to 0.01 over 3 epochs)
+        warmup_scheduler = get_warmup_scheduler(optimizer, warmup_epochs=Config.STAGE1_WARMUP_EPOCHS)
+        scheduler = warmup_scheduler
+        scheduler_type = "LinearLR (warmup)"
+        
+    else:
+        # Adam optimizer (baseline comparison)
+        optimizer = create_optimizer(
+            model.classifier,
+            optimizer_type='adam',
+            stage=1,
+            lr=args.lr if args.lr != Config.STAGE1_LR else None
+        )
+        scheduler = None
+        scheduler_type = "None (Adam typically doesn't need warmup)"
     
-    # LR Warmup Scheduler
-    warmup_scheduler = LinearLR(
-        optimizer,
-        start_factor=Config.STAGE1_WARMUP_START_FACTOR,  # Start at 1% of base LR
-        total_iters=Config.STAGE1_WARMUP_EPOCHS          # Reach base LR at epoch 3
-    )
-    
-    print(f"\n✓ Optimizer: Adam")
-    print(f"  Learning rate: {args.lr}")
-    print(f"  Weight decay: {args.weight_decay}")
-    print(f"  Parameters: Classifier only ({sum(p.numel() for p in model.classifier.parameters()):,})")
-    
-    print(f"\n✓ LR Warmup Scheduler: LinearLR")
-    print(f"  Warmup epochs: {Config.STAGE1_WARMUP_EPOCHS}")
-    print(f"  Start LR: {args.lr * Config.STAGE1_WARMUP_START_FACTOR:.2e} ({Config.STAGE1_WARMUP_START_FACTOR*100:.0f}% of base)")
-    print(f"  End LR: {args.lr:.2e} (base)")
+    print_optimizer_info(optimizer, stage=1)
+    print(f"\n✓ Scheduler: {scheduler_type}")
     
     print(f"\n✓ Loss: CrossEntropyLoss with Effective Number class weights")
     if args.label_smoothing > 0:
@@ -237,9 +274,9 @@ def main():
             model, val_loader, criterion, device, desc='Validation'
         )
         
-        # Update LR (warmup for first epochs)
-        if epoch <= Config.STAGE1_WARMUP_EPOCHS:
-            warmup_scheduler.step()
+        # Update LR scheduler if available (only for SGD warmup or other schedulers)
+        if scheduler is not None:
+            scheduler.step()
         
         # Track metrics
         tracker.update(epoch, train_loss, train_acc, val_loss, val_acc, current_lr)
@@ -262,7 +299,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'optimizer_type': 'adam',  # Track optimizer for stage continuity
+                'optimizer_type': args.optimizer.lower(),  # 'sgd' or 'adam' for stage continuity
                 'train_loss': train_loss,
                 'val_loss': val_loss,
                 'val_acc': val_acc,

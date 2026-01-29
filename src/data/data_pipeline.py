@@ -5,8 +5,89 @@ Create data transformation pipelines and DataLoaders for training and testing.
 
 import os
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
+
+from PIL import Image
+
+
+class EmotionDatasetWithPreprocessing(Dataset):
+    """
+    Custom Dataset that supports optional preprocessing before transforms.
+    
+    Preprocessing pipeline (if enabled):
+    1. Load raw image (48×48 grayscale NumPy array)
+    2. Apply preprocessing (Unsharp Mask + CLAHE)
+    3. Convert to PIL Image
+    4. Apply transforms/augmentation
+    5. Return tensor
+    
+    Args:
+        root (str): Path to dataset directory (contains emotion subdirectories)
+        transform (callable, optional): Transform to apply after preprocessing
+        apply_preprocessing (bool): Whether to apply Unsharp Mask + CLAHE preprocessing
+        preprocess_config (dict, optional): Custom preprocessing parameters
+    """
+    
+    def __init__(self, root, transform=None, apply_preprocessing=False, preprocess_config=None):
+        """Initialize dataset with preprocessing support."""
+        self.root = root
+        self.transform = transform
+        self.apply_preprocessing = apply_preprocessing
+        self.preprocess_config = preprocess_config
+        
+        # Use ImageFolder to load samples
+        self.image_folder = datasets.ImageFolder(root=root)
+        self.samples = self.image_folder.samples
+        self.classes = self.image_folder.classes
+        self.class_to_idx = self.image_folder.class_to_idx
+        
+        # Import preprocessing functions if needed
+        if self.apply_preprocessing:
+            try:
+                from src.data.preprocessing import preprocess_fer2013_image
+                self.preprocess_fn = preprocess_fer2013_image
+            except ImportError:
+                print("⚠ Warning: Could not import preprocessing module. Disabling preprocessing.")
+                self.apply_preprocessing = False
+    
+    def __len__(self):
+        """Return number of samples in dataset."""
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        """
+        Load and preprocess a single sample.
+        
+        Pipeline:
+        1. Load raw image as NumPy array (uint8, [0, 255])
+        2. [OPTIONAL] Apply preprocessing (Unsharp Mask + CLAHE)
+        3. Convert to PIL Image
+        4. Apply transforms (augmentation, normalization)
+        5. Return (image_tensor, label)
+        """
+        # Get image path and label
+        path, label = self.samples[idx]
+        
+        # Load image as grayscale NumPy array (for preprocessing)
+        import cv2
+        image_array = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        
+        if image_array is None:
+            raise IOError(f"Failed to load image: {path}")
+        
+        # Apply preprocessing if enabled (BEFORE converting to PIL)
+        if self.apply_preprocessing:
+            image_array = self.preprocess_fn(image_array, config=self.preprocess_config)
+        
+        # Convert NumPy array to PIL Image
+        image = Image.fromarray(image_array, mode='L')  # 'L' = grayscale
+        
+        # Apply transforms (augmentation, normalization)
+        if self.transform is not None:
+            image = self.transform(image)
+        
+        return image, label
 
 
 def get_train_transforms(img_size=48, normalize_type='imagenet'):
@@ -124,7 +205,8 @@ def get_test_transforms(img_size=48, normalize_type='imagenet'):
     return test_transforms
 
 
-def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_split=0.2, normalize_type='imagenet'):
+def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_split=0.2, normalize_type='imagenet', 
+                       apply_preprocessing=False, preprocess_config=None):
     """
     Create PyTorch DataLoaders for training and testing.
     
@@ -138,6 +220,8 @@ def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_
             - 'imagenet': ImageNet-style (mean=[0.485], std=[0.229]) - DEFAULT for VGG16 transfer learning
             - 'zero_one': [0,1] range
             - 'neg_one_one': [-1,1] range
+        apply_preprocessing (bool): Whether to apply Unsharp Mask + CLAHE preprocessing
+        preprocess_config (dict, optional): Custom preprocessing parameters
         
     Returns:
         tuple: (train_loader, val_loader, test_loader, class_names)
@@ -159,6 +243,16 @@ def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_
     test_transforms = get_test_transforms(img_size, normalize_type=normalize_type)
     
     print(f"\nPreprocessing configuration:")
+    print(f"  Preprocessing enabled: {apply_preprocessing}")
+    if apply_preprocessing:
+        if preprocess_config:
+            print(f"  Unsharp Mask: radius={preprocess_config.get('unsharp_radius', 2.0)}, "
+                  f"percent={preprocess_config.get('unsharp_percent', 150)}, "
+                  f"threshold={preprocess_config.get('unsharp_threshold', 3)}")
+            print(f"  CLAHE: clip_limit={preprocess_config.get('clahe_clip_limit', 2.0)}, "
+                  f"tile_grid_size={preprocess_config.get('clahe_tile_grid', (8, 8))}")
+        else:
+            print("  Using default parameters: Unsharp(radius=2.0, percent=150, threshold=3), CLAHE(clip=2.0, grid=(8,8))")
     print(f"  Normalization: {normalize_type}")
     print(f"  Image size: {img_size}x{img_size}")
     print(f"  Augmentation: Random rotation (±10°), rescaling (±20%), shifts (±20%), random erasing (50%)")
@@ -167,10 +261,12 @@ def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_
     print("LOADING DATASETS")
     print(f"{'='*60}")
     
-    # Load full training dataset
-    full_train_dataset = datasets.ImageFolder(
+    # Load full training dataset with preprocessing support
+    full_train_dataset = EmotionDatasetWithPreprocessing(
         root=train_dir,
-        transform=train_transforms
+        transform=train_transforms,
+        apply_preprocessing=apply_preprocessing,
+        preprocess_config=preprocess_config
     )
     
     # Get class names
@@ -200,10 +296,12 @@ def create_dataloaders(data_dir, batch_size=64, img_size=48, num_workers=4, val_
             train_indices
         )
         
-        # Create validation dataset WITHOUT augmentation
-        val_dataset_base = datasets.ImageFolder(
+        # Create validation dataset WITHOUT augmentation (but WITH preprocessing if enabled)
+        val_dataset_base = EmotionDatasetWithPreprocessing(
             root=train_dir,
-            transform=test_transforms  # NO augmentation
+            transform=test_transforms,  # NO augmentation
+            apply_preprocessing=apply_preprocessing,  # Same preprocessing as training
+            preprocess_config=preprocess_config
         )
         val_dataset = torch.utils.data.Subset(
             val_dataset_base,

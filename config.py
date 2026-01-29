@@ -80,6 +80,22 @@ class Config:
     EFFECTIVE_NUMBER_BETA = 0.9999  # For Effective Number method
     
     # ========================================================================
+    # IMAGE PREPROCESSING (Unsharp Mask + CLAHE)
+    # ========================================================================
+    
+    # Enable/disable preprocessing pipeline
+    PREPROCESSING_ENABLED = True
+    
+    # Unsharp Mask parameters (sharpens edges, recovers detail from downsampling)
+    UNSHARP_RADIUS = 2.0       # Blur kernel radius (1-5, recommended: 2.0 for 48×48)
+    UNSHARP_PERCENT = 150      # Sharpening strength % (100-200, recommended: 150)
+    UNSHARP_THRESHOLD = 3      # Minimum brightness change to sharpen (0-10, recommended: 3)
+    
+    # CLAHE parameters (normalizes contrast across varying lighting)
+    CLAHE_CLIP_LIMIT = 2.0     # Contrast limiting threshold (1.0-4.0, recommended: 2.0)
+    CLAHE_TILE_GRID = (8, 8)   # Grid dimensions for adaptive equalization (recommended: (8, 8))
+    
+    # ========================================================================
     # MODEL CONFIGURATION
     # ========================================================================
     
@@ -245,6 +261,22 @@ class Config:
     # ========================================================================
     # HELPER METHODS
     # ========================================================================
+    
+    @classmethod
+    def get_preprocessing_config(cls) -> dict:
+        """
+        Get preprocessing configuration as dictionary.
+        
+        Returns:
+            dict: Preprocessing parameters for Unsharp Mask and CLAHE
+        """
+        return {
+            'unsharp_radius': cls.UNSHARP_RADIUS,
+            'unsharp_percent': cls.UNSHARP_PERCENT,
+            'unsharp_threshold': cls.UNSHARP_THRESHOLD,
+            'clahe_clip_limit': cls.CLAHE_CLIP_LIMIT,
+            'clahe_tile_grid': cls.CLAHE_TILE_GRID
+        }
     
     @classmethod
     def get_stage_config(cls, stage: int) -> dict:
