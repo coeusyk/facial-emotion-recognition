@@ -28,6 +28,8 @@ Output:
 import sys
 from pathlib import Path
 import argparse
+import time
+from datetime import datetime
 import torch
 import torch.nn as nn
 
@@ -81,6 +83,10 @@ def main():
     else:
         checkpoint_path = Config.STAGE1_CHECKPOINT
         log_path = Config.STAGE1_LOG
+    
+    # Ensure parent directories exist
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     
     print("=" * 80)
     print("STAGE 1: WARMUP TRAINING - CLASSIFICATION HEAD STABILIZATION")
@@ -257,7 +263,12 @@ def main():
     
     emotion_classes = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
     
+    # Timing tracking
+    training_start_time = time.time()
+    epoch_times = []
+    
     for epoch in range(1, args.epochs + 1):
+        epoch_start_time = time.time()
         current_lr = optimizer.param_groups[0]['lr']
         
         print(f"\n{'='*80}")
@@ -281,11 +292,16 @@ def main():
         # Track metrics
         tracker.update(epoch, train_loss, train_acc, val_loss, val_acc, current_lr)
         
+        # Calculate epoch time
+        epoch_time = time.time() - epoch_start_time
+        epoch_times.append(epoch_time)
+        
         # Print results
         print(f"\n{'='*80}")
         print(f"Epoch {epoch} Results:")
         print(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
         print(f"  Val Loss:   {val_loss:.4f} | Val Acc:   {val_acc:.2f}%")
+        print(f"  Time: {epoch_time:.2f}s")
         print(f"\nPer-Class Accuracy:")
         for class_idx, acc in sorted(per_class_acc.items()):
             print(f"  {emotion_classes[class_idx]:8s}: {acc:5.2f}%")
@@ -312,6 +328,10 @@ def main():
             torch.save(checkpoint_data, checkpoint_path)
             print(f"\n✓ Best model saved (Val Acc: {val_acc:.2f}%)")
     
+    # Calculate total training time
+    total_training_time = time.time() - training_start_time
+    avg_epoch_time = sum(epoch_times) / len(epoch_times) if epoch_times else 0
+    
     # Save training history
     print(f"\n{'='*80}")
     print("TRAINING COMPLETE")
@@ -319,10 +339,26 @@ def main():
     
     tracker.save_to_csv(log_path)
     
+    # Save timing information
+    timing_log_path = checkpoint_path.parent / 'stage1_timing_summary.txt'
+    with open(timing_log_path, 'w') as f:
+        f.write(f"Stage 1 Training Timing Summary\n")
+        f.write(f"{'='*80}\n")
+        f.write(f"Start Time: {datetime.fromtimestamp(training_start_time).strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"End Time: {datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Total Training Time: {total_training_time:.2f}s ({total_training_time/60:.2f}m)\n")
+        f.write(f"Average Epoch Time: {avg_epoch_time:.2f}s\n")
+        f.write(f"Fastest Epoch: {min(epoch_times):.2f}s\n")
+        f.write(f"Slowest Epoch: {max(epoch_times):.2f}s\n")
+        f.write(f"Total Epochs: {len(epoch_times)}\n")
+    
     print(f"\n✓ Training completed successfully!")
     print(f"  Best validation accuracy: {best_val_acc:.2f}% (Epoch {best_epoch})")
+    print(f"  Total training time: {total_training_time:.2f}s ({total_training_time/60:.2f}m)")
+    print(f"  Average epoch time: {avg_epoch_time:.2f}s")
     print(f"  Model saved to: {checkpoint_path}")
     print(f"  Training log saved to: {log_path}")
+    print(f"  Timing log saved to: {timing_log_path}")
     
     print(f"\n{'='*80}")
     print("STAGE 1 SUCCESS CRITERIA CHECK")
