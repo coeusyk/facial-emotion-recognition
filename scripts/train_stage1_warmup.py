@@ -44,6 +44,14 @@ from src.training.trainer import train_one_epoch, validate
 from src.training.utils import MetricTracker
 from src.training.optimizer import create_optimizer, get_warmup_scheduler, print_optimizer_info, apply_gradient_clipping
 
+# GPU Monitoring
+try:
+    sys.path.insert(0, str(project_root / 'scripts' / 'diagnostics'))
+    from diagnostics.gpu_monitor import GPUMonitor
+    GPU_MONITORING_AVAILABLE = True
+except ImportError:
+    GPU_MONITORING_AVAILABLE = False
+
 
 def main():
     parser = argparse.ArgumentParser(description='Stage 1: Warmup Training')
@@ -254,6 +262,21 @@ def main():
     # Metric tracking
     tracker = MetricTracker()
     
+    # Initialize GPU monitoring if available
+    gpu_monitor = None
+    if GPU_MONITORING_AVAILABLE and torch.cuda.is_available():
+        try:
+            gpu_name = torch.cuda.get_device_name(0).replace(' ', '_').replace('NVIDIA', '').replace('GeForce', '').strip('_')
+            gpu_monitor = GPUMonitor(
+                log_file=f'stage1_warmup_{gpu_name}.csv',
+                interval=2.0,
+                metrics_dir='gpu_metrics'
+            )
+            gpu_monitor.start()
+        except Exception as e:
+            print(f"\n⚠ Could not start GPU monitoring: {e}")
+            gpu_monitor = None
+    
     # Training loop
     print(f"\n{'='*80}")
     print("TRAINING")
@@ -365,6 +388,13 @@ def main():
     print(f"  Training log saved to: {log_path}")
     print(f"  Timing log saved to: {timing_log_path}")
     
+    # Stop GPU monitoring and generate charts
+    if gpu_monitor is not None:
+        try:
+            gpu_monitor.stop()
+        except Exception as e:
+            print(f"\n⚠ Error stopping GPU monitor: {e}")
+    
     print(f"\n{'='*80}")
     print("STAGE 1 SUCCESS CRITERIA CHECK")
     print("="*80)
@@ -385,4 +415,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n✗ Training interrupted by user")
+    except Exception as e:
+        print(f"\n\n✗ Training failed: {e}")
+        raise

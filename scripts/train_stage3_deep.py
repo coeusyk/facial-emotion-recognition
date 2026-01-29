@@ -48,6 +48,14 @@ from src.training.utils import MetricTracker, EarlyStopping
 from src.training.adaptive_weights import calculate_adaptive_weights, save_weight_history, print_weight_comparison
 from src.training.optimizer import create_optimizer, print_optimizer_info, apply_gradient_clipping
 
+# GPU Monitoring
+try:
+    sys.path.insert(0, str(project_root / 'scripts' / 'diagnostics'))
+    from diagnostics.gpu_monitor import GPUMonitor
+    GPU_MONITORING_AVAILABLE = True
+except ImportError:
+    GPU_MONITORING_AVAILABLE = False
+
 
 def main():
     parser = argparse.ArgumentParser(description='Stage 3: Deep Fine-tuning')
@@ -498,6 +506,21 @@ def main():
     # Metric tracking
     tracker = MetricTracker()
     
+    # Initialize GPU monitoring if available
+    gpu_monitor = None
+    if GPU_MONITORING_AVAILABLE and torch.cuda.is_available():
+        try:
+            gpu_name = torch.cuda.get_device_name(0).replace(' ', '_').replace('GeForce', '').strip('_')
+            gpu_monitor = GPUMonitor(
+                log_file=f'stage3_deep_{gpu_name}.csv',
+                interval=2.0,
+                metrics_dir='gpu_metrics'
+            )
+            gpu_monitor.start()
+        except Exception as e:
+            print(f"\n⚠ Could not start GPU monitoring: {e}")
+            gpu_monitor = None
+    
     # Training loop
     print(f"\n{'='*80}")
     print("TRAINING")
@@ -620,6 +643,13 @@ def main():
     print(f"  Average epoch time: {avg_epoch_time:.2f}s")
     print(f"  Model saved to: {checkpoint_path}")
     print(f"  Training log saved to: {log_path}")
+    
+    # Stop GPU monitoring and generate charts
+    if gpu_monitor is not None:
+        try:
+            gpu_monitor.stop()
+        except Exception as e:
+            print(f"\n⚠ Error stopping GPU monitor: {e}")
     
     print(f"\n{'='*80}")
     print(f"  Timing log saved to: {timing_log_path}")
