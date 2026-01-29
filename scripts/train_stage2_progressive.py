@@ -451,8 +451,12 @@ def main():
         f.write(f"End Time: {datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Total Training Time: {total_training_time:.2f}s ({total_training_time/60:.2f}m)\n")
         f.write(f"Average Epoch Time: {avg_epoch_time:.2f}s\n")
-        f.write(f"Fastest Epoch: {min(epoch_times):.2f}s\n")
-        f.write(f"Slowest Epoch: {max(epoch_times):.2f}s\n")
+        if epoch_times:
+            f.write(f"Fastest Epoch: {min(epoch_times):.2f}s\n")
+            f.write(f"Slowest Epoch: {max(epoch_times):.2f}s\n")
+        else:
+            f.write("Fastest Epoch: N/A (no epochs completed)\n")
+            f.write("Slowest Epoch: N/A (no epochs completed)\n")
         f.write(f"Total Epochs: {len(epoch_times)}\n")
     
     print(f"\n✓ Training completed successfully!")

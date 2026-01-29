@@ -98,10 +98,7 @@ def main():
     # Ensure parent directories exist
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path = args.output_dir / 'emotion_stage3_training.csv'
-    else:
-        checkpoint_path = Config.STAGE3_CHECKPOINT
-        log_path = Config.STAGE3_LOG
+
     
     # Auto-detect Phase 2 optimized learning rate and weight decay settings
     # NOTE: Optimizer TYPE is now determined by Stage 2 checkpoint for continuity
@@ -544,10 +541,9 @@ def main():
     print(f"  Average epoch time: {avg_epoch_time:.2f}s")
     print(f"  Model saved to: {checkpoint_path}")
     print(f"  Training log saved to: {log_path}")
-    print(f"  Timing log saved to: {timing_log_path}"
     
     print(f"\n{'='*80}")
-    print("STAGE 3 SUCCESS CRITERIA CHECK")
+    print(f"  Timing log saved to: {timing_log_path}")
     print("="*80)
     
     target_min = Config.STAGE3_TARGET_VAL_ACC_MIN
